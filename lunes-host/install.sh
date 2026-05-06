@@ -22,11 +22,11 @@ publicKey=$(echo "$keyPair" | grep "Public key" | awk '{print $3}')
 sed -i "s/YOUR_PRIVATE_KEY/$privateKey/g" config.json
 shortId=$(openssl rand -hex 4)
 sed -i "s/YOUR_SHORT_ID/$shortId/g" config.json
-vlessUrl="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=$publicKey&sid=$shortId&spx=%2F&type=tcp&headerType=none#lunes-reality"
+vlessUrl="vless://$UUID@$DOMAIN:$PORT?encryption=none&security=none&sni=www.cloudflare.com&type=ws&host=www.cloudflare.com&path=%2kudda-vpn#lunes-ws
 echo $vlessUrl > /home/container/node.txt
 
 echo "============================================================"
-echo "🚀 VLESS Reality & HY2 Node Info"
+echo "🚀 VLESS Ws Node Info"
 echo "------------------------------------------------------------"
 echo "$vlessUrl"
 echo "============================================================"
