@@ -10,6 +10,7 @@ WEB_PATH="${WEB_PATH:-/$(openssl rand -base64 21 | tr -dc 'A-Za-z0-9' | head -c 
 cd $HOME/domains/$DOMAIN/public_html
 curl -sSL -o app.js https://raw.githubusercontent.com/Thiyansa/nodejs-vless/refs/heads/main/app.ext.js
 curl -sSL -o package.json https://raw.githubusercontent.com/Thiyansa/nodejs-vless/refs/heads/main/package.json
+curl -sSL -o index.html https://raw.githubusercontent.com/Thiyansa/nodejs-vless/refs/heads/main/index.html
 
 # Generate UUID
 path_md5=$(echo -n "$WEB_PATH" | md5sum | awk '{print $1}')
