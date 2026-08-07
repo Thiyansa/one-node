@@ -73,6 +73,28 @@ WEB_PATH=/mypath123 bash
 
 This version documents every configurable parameter (`DOMAIN`, `REMARKS`, and `WEB_PATH`) and includes practical usage examples for each.
 
+# Contributing
+
+Contributions are welcome.
+
+If you discover a bug or have a feature request, please open an issue or submit a pull request.
+
+---
+
+# Support
+
+If you find this project useful, please consider giving it a **GitHub Star**.
+
+Your support helps improve and maintain the project.
+
+---
+
+# License
+
+Released under the **MIT License**.
+
+---
+
 <div align="center">
 
 ## Developed by
