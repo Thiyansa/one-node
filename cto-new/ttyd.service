@@ -1,0 +1,11 @@
+# /etc/systemd/system/td.service
+[Unit]
+Description=td
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/td -p 80 -W env HISTFILE=/dev/null bash
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
