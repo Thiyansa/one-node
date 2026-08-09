@@ -3,5 +3,5 @@
     "owner_id": "YOUR_TG_ID",
     "domain": "YOUR_DOMAIN",
     "port": 10808,
-    "path": "YOUR_PATH"
+    "path": "/YOUR_PATH"
 }
