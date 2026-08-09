@@ -3,5 +3,42 @@
     "owner_id": "YOUR_TG_ID",
     "domain": "YOUR_DOMAIN",
     "port": 10808,
-    "path": "/YOUR_PATH"
+    "image_url": "https://raw.githubusercontent.com/Thiyansa/Resource/refs/heads/main/Free%20VPN%20Creater/logo001.png",
+    "private_mode": {
+        "enabled": false,
+        "allowed_users": [],
+        "blocked_users": []
+    },
+    "group_settings": {
+        "enabled": true,
+        "allowed_groups": [],
+        "blocked_groups": []
+    },
+    "channel_settings": {
+        "enabled": true,
+        "allowed_channels": [],
+        "blocked_channels": []
+    },
+    "admin_settings": {
+        "enable_button": "enable",
+        "disable_button": "disable",
+        "require_admin_approval": true,
+        "auto_enable_new_groups": false
+    },
+    "user_limits": {
+        "max_configs_per_user": 5,
+        "max_duration_hours": 24,
+        "min_duration_hours": 1
+    },
+    "features": {
+        "allow_qr_codes": true,
+        "allow_link_copy": true,
+        "show_progress_bars": true,
+        "enable_study_tips": true
+    },
+    "chat_controls": {
+        "enabled_chats": [],
+        "disabled_chats": [],
+        "pending_approvals": []
+    }
 }
