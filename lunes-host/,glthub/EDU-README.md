@@ -33,31 +33,10 @@
     {
       "protocol": "blackhole",
       "tag": "blocked"
-    },
-    {
-      "protocol": "freedom",
-      "settings": {
-        "redirect": "https://edu-block.kudda.dev"
-      },
-      "tag": "Block-Redirect"
     }
   ],
   "routing": {
     "rules": [
-      {
-        "inboundTag": [
-          "api"
-        ],
-        "outboundTag": "api",
-        "type": "field"
-      },
-      {
-        "ip": [
-          "geoip:private"
-        ],
-        "outboundTag": "blocked",
-        "type": "field"
-      },
       {
         "type": "field",
         "protocol": [
@@ -66,17 +45,12 @@
         "outboundTag": "blocked"
       },
       {
+        "type": "field",
         "domain": [
           "geosite:category-ads-all",
-          "ext:geosite_IR.dat:category-ads-all",
-          "ext:geosite_RU.dat:category-ads-all",
-          "ext:geosite_IR.dat:malware",
-          "ext:geosite_IR.dat:phishing",
-          "ext:geosite_IR.dat:cryptominers",
           "geosite:category-porn"
         ],
-        "outboundTag": "Block-Redirect",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "domain": [
@@ -147,7 +121,7 @@
           "domain:9anime.to",
           "domain:aniwave.to"
         ],
-        "outboundTag": "Block-Redirect",
+        "outboundTag": "blocked",
         "type": "field"
       }
     ]
