@@ -4,7 +4,12 @@
         "listen": "0.0.0.0",
         "protocol": "vless",
         "settings": {
-            "clients": [{"id": "YOUR_UUID"}],
+            "clients": [
+                {
+                    "id": "YOUR_UUID",
+                    "email": "KUDDA"
+                }
+            ],
             "decryption": "none"
         },
         "streamSettings": {
