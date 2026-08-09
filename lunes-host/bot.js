@@ -297,7 +297,7 @@ async function getCachedImage() {
     
     try {
         await fsPromises.access(cachePath);
-        console.log('✅ Using cached image');
+        // console.log('✅ Using cached image');
         return cachePath;
     } catch {
         console.log('📥 Downloading image from GitHub...');
