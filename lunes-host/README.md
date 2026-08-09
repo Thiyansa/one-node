@@ -53,6 +53,13 @@ env DOMAIN=YOUR_DOMAIN \
 curl -s https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/install.sh | env DOMAIN=YOUR_DOMAIN PORT=YOUR_PORT UUID=2584b733-9095-4bec-a7d5-62b473540f7a bash
 ```
 
+After installation, start the application with:
+🚀 Startup Command
+
+```bash
+node app.js
+```
+
 ---
 
 ## ⚙️ Configuration
@@ -66,22 +73,6 @@ Replace the following values with your own settings:
 | `UUID`   | Client UUID              |
 
 > 💡 **Note:** Make sure your domain is correctly pointed to the VPS before running the installation command.
-
----
-
-## ▶️ Start the Server
-
-After installation, start the application with:
-
-```bash
-node app.js
-```
-
-### 🚀 Startup Command
-
-```bash
-node app.js
-```
 
 ---
 
@@ -103,6 +94,13 @@ env DOMAIN=YOUR_DOMAIN \
 
 ```bash
 curl -s https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/bot-install.sh | env DOMAIN=YOUR_DOMAIN PORT=YOUR_PORT UUID=2584b733-9095-4bec-a7d5-62b473540f7a TOKEN=YOUR_BOT_TOKEN OWNER=YOUR_TELEGRAM_ID bash
+```
+
+After installation, start the application with:
+🚀 Startup Command
+
+```bash
+node bot.js
 ```
 
 ---
