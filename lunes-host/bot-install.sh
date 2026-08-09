@@ -2,6 +2,7 @@
 
 DOMAIN="${DOMAIN:-node68.lunes.host}"
 PORT="${PORT:-10808}"
+UUID="${UUID:-2584b733-9095-4bec-a7d5-62b473540f7a}"
 PATH="${PATH:-/kudda-vpn}"
 BOT_TOKEN="${TOKEN:-https://t.me/mataberiyo}"
 OWNER_ID="${OWNER:-https://t.me/mataberiyo}"
