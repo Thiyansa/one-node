@@ -155,9 +155,3 @@
 }
 
 ```
-
----
-
-## Back
-
-**← [Return to Main README](lunes-host/README.md)**
