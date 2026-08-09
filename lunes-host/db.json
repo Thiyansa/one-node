@@ -1,0 +1,7 @@
+{
+    "bot_token": "YOUR_TG_BOT_API_KEY",
+    "owner_id": "YOUR_TG_ID",
+    "domain": "YOUR_DOMAIN",
+    "port": 10808,
+    "path": "YOUR_PATH"
+}
