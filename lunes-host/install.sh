@@ -15,7 +15,7 @@ unzip Xray-linux-64.zip
 rm Xray-linux-64.zip
 mv xray xy
 curl -sSL -o config.json https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/xray-config.json
-sed -i "s/10008/$PORT/g" config.json
+sed -i "s/YOUT_PORT/$PORT/g" config.json
 sed -i "s/YOUR_UUID/$UUID/g" config.json
 keyPair=$(./xy x25519)
 privateKey=$(echo "$keyPair" | grep "Private key" | awk '{print $3}')
