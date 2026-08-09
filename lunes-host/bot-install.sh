@@ -32,6 +32,7 @@ mv xray xy
 curl -sSL -o config.json https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/xray-config.json
 sed -i "s/10808/$PORT/g" config.json
 sed -i "s/YOUR_UUID/$UUID/g" config.json
+sed -i "s/YOUR_PATH/$VLESS_PATH/g" config.json
 
 keyPair=$(./xy x25519)
 privateKey=$(echo "$keyPair" | grep "Private key" | awk '{print $3}')
