@@ -29,6 +29,8 @@ sed -i "s/YOUR_DOMAIN/$DOMAIN/g" db.json
 sed -i "s/10808/$PORT/g" db.json
 sed -i "s/YOUR_PATH/$PATH/g" db.json
 
+npm install
+
 keyPair=$(./xy x25519)
 privateKey=$(echo "$keyPair" | grep "Private key" | awk '{print $3}')
 publicKey=$(echo "$keyPair" | grep "Public key" | awk '{print $3}')
