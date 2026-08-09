@@ -1,6 +1,6 @@
 {
     "inbounds": [{
-        "port": 3155, 
+        "port": YOUT_PORT, 
         "listen": "0.0.0.0",
         "protocol": "vless",
         "settings": {
