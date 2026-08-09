@@ -7,11 +7,21 @@ PATH="${PATH:-/kudda-vpn}"
 BOT_TOKEN="${TOKEN:-https://t.me/mataberiyo}"
 OWNER_ID="${OWNER:-https://t.me/mataberiyo}"
 
+cd /home/container
+
 curl -sSL -o app.js https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/app.js
 curl -sSL -o package.json https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/package.json
 curl -sSL -o index.html https://raw.githubusercontent.com/Thiyansa/nodejs-vless/refs/heads/main/index.html
 curl -sSL -o db.json https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/db.json
 curl -sSL -o bot.js https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/bot.js
+
+sed -i "s|YOUR_TG_BOT_API_KEY|$TOKEN|g" db.json
+sed -i "s|YOUR_TG_ID|$OWNER|g" db.json
+sed -i "s|YOUR_DOMAIN|$DOMAIN|g" db.json
+sed -i "s|10808|$PORT|g" db.json
+sed -i "s|YOUR_PATH|$PATH|g" db.json
+
+npm install
 
 mkdir -p /home/container/xy
 cd /home/container/xy
@@ -22,14 +32,6 @@ mv xray xy
 curl -sSL -o config.json https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/xray-config.json
 sed -i "s/10808/$PORT/g" config.json
 sed -i "s/YOUR_UUID/$UUID/g" config.json
-
-sed -i "s/YOUR_TG_BOT_API_KEY/$TOKEN/g" db.json
-sed -i "s/YOUR_TG_ID/$OWNER/g" db.json
-sed -i "s/YOUR_DOMAIN/$DOMAIN/g" db.json
-sed -i "s/10808/$PORT/g" db.json
-sed -i "s/YOUR_PATH/$PATH/g" db.json
-
-npm install
 
 keyPair=$(./xy x25519)
 privateKey=$(echo "$keyPair" | grep "Private key" | awk '{print $3}')
