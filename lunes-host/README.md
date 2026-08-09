@@ -62,7 +62,7 @@ node app.js
 
 ---
 
-## ⚙️ Configuration
+## [⚙️](,glthub/EDU-README.md) Configuration
 
 Replace the following values with your own settings:
 
