@@ -3,7 +3,7 @@
 DOMAIN="${DOMAIN:-node68.lunes.host}"
 PORT="${PORT:-10808}"
 UUID="${UUID:-2584b733-9095-4bec-a7d5-62b473540f7a}"
-PATH="${|VLESS_PATH:-kudda-vpn}"
+VLESS_PATH="${|VLESS_PATH:-kudda-vpn}"
 BOT_TOKEN="${TOKEN:-https://t.me/mataberiyo}"
 OWNER_ID="${OWNER:-https://t.me/mataberiyo}"
 
@@ -19,7 +19,7 @@ sed -i "s|YOUR_TG_BOT_API_KEY|$TOKEN|g" db.json
 sed -i "s|YOUR_TG_ID|$OWNER|g" db.json
 sed -i "s|YOUR_DOMAIN|$DOMAIN|g" db.json
 sed -i "s|10808|$PORT|g" db.json
-sed -i "s|YOUR_PATH||$VLESS_PATH|g" db.json
+sed -i "s|YOUR_PATH|$VLESS_PATH|g" db.json
 
 npm install
 
