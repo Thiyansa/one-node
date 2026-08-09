@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 DOMAIN="${DOMAIN:-node68.lunes.host}"
-PORT="${PORT:-10008}"
+PORT="${PORT:-10808}"
 UUID="${UUID:-2584b733-9095-4bec-a7d5-62b473540f7a}"
 
 curl -sSL -o app.js https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/app.js
