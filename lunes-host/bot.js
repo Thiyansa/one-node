@@ -76,42 +76,40 @@ async function loadConfig() {
     }
 }
 
-// ==================== CHECK CHAT PERMISSIONS ====================
-function isChatAllowed(chatId) {
+// ==================== CHECK PERMISSIONS - FIXED ====================
+function isChatEnabled(chatId) {
     const chatIdStr = chatId.toString();
-    
-    // Check if chat is in disabled list
+    // If chat is explicitly disabled, return false
     if (CHAT_CONTROLS.disabled_chats.includes(chatIdStr)) {
         return false;
     }
-    
     // If enabled_chats is not empty, only allow those chats
     if (CHAT_CONTROLS.enabled_chats.length > 0) {
         return CHAT_CONTROLS.enabled_chats.includes(chatIdStr);
     }
-    
     return true;
 }
 
 function isPrivateUserAllowed(userId) {
     const userIdStr = userId.toString();
     
-    // If private mode is disabled, allow all
-    if (!PRIVATE_MODE.enabled) {
-        return true;
-    }
-    
-    // Check if user is blocked
+    // BLOCKED USERS ARE ALWAYS BLOCKED - FIXED: Check this FIRST
     if (PRIVATE_MODE.blocked_users.includes(userIdStr)) {
         return false;
     }
     
-    // If allowed_users is not empty, only allow those users
+    // If private mode is disabled, allow all (except blocked users)
+    if (!PRIVATE_MODE.enabled) {
+        return true;
+    }
+    
+    // If private mode is enabled, only allow allowed users
     if (PRIVATE_MODE.allowed_users.length > 0) {
         return PRIVATE_MODE.allowed_users.includes(userIdStr);
     }
     
-    return true;
+    // If private mode enabled but allowed list empty, block everyone (except owner)
+    return false;
 }
 
 function isGroupAllowed(chatId) {
@@ -156,6 +154,205 @@ function isChannelAllowed(chatId) {
     return true;
 }
 
+// ==================== COMPREHENSIVE PERMISSION CHECK - FIXED ====================
+async function checkPermissions(ctx) {
+    // Skip if no chat or from
+    if (!ctx.chat || !ctx.from) return true;
+    
+    const chatType = ctx.chat.type;
+    const userId = ctx.from.id;
+    const chatId = ctx.chat.id;
+    const isOwner = userId.toString() === OWNER_ID;
+    
+    // Owner always has access to everything
+    if (isOwner) return true;
+    
+    // ----- CHECK BLOCKED USERS FIRST (MOST IMPORTANT) -----
+    // Blocked users cannot do ANYTHING in ANY chat
+    if (PRIVATE_MODE.blocked_users.includes(userId.toString())) {
+        try {
+            await ctx.reply(`
+<b>🚫 Bot Access Denied</b>
+
+<blockquote><i>ඔබට මෙම Bot එක භාවිතා කිරීමට දැනට අවසර නොමැත.
+වැඩි විස්තර හෝ අවහිර කිරීම ඉවත් කිරීම සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+
+<b>📩 Contact:</b>
+<a href="https://t.me/mataberiyo">Admin</a>
+            `, { parse_mode: 'HTML' });
+        } catch (e) {
+            // User might not be able to receive messages
+        }
+        return false;
+    }
+    
+    // ----- CHECK PRIVATE CHAT -----
+    if (chatType === 'private') {
+        // If private mode is enabled, check if user is allowed
+        if (PRIVATE_MODE.enabled) {
+            if (!PRIVATE_MODE.allowed_users.includes(userId.toString())) {
+                await ctx.reply(`
+<b>⛔ පුද්ගලික ප්‍රවේශ මාදිලිය</b>
+
+<blockquote><i>මෙම සේවාව දැනට Private Mode තුළ ක්‍රියාත්මක වේ.
+ඔබට මෙය භාවිතා කිරීමට අවසර ලබා දී නොමැත.</i></blockquote>
+
+<b>📌 අවසර ලබා ගැනීමට සම්බන්ධ වන්න:</b>
+<a href="https://t.me/mataberiyo">Contact Admin</a>
+                `, { parse_mode: 'HTML' });
+                return false;
+            }
+        }
+        // If private mode disabled, all non-blocked users can use private chat
+        return true;
+    }
+    
+    // ----- CHECK GROUP -----
+    if (chatType === 'group' || chatType === 'supergroup') {
+        // Check group settings
+        if (!GROUP_SETTINGS.enabled) {
+            await ctx.reply(`
+<b>🚫 Groups Disabled</b>
+
+<blockquote><i>කණ්ඩායම් ප්‍රවේශය දැනට පරිපාලක විසින් සීමා කර ඇත.
+මෙම පහසුකම භාවිතා කිරීමට අවසර ලබා ගැනීමට Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+
+<b>📩 සහාය සඳහා:</b>
+<a href="https://t.me/mataberiyo">Contact Admin</a>
+            `, { parse_mode: 'HTML' });
+            return false;
+        }
+        
+        // Check if group is blocked
+        if (GROUP_SETTINGS.blocked_groups.includes(chatId.toString())) {
+            await ctx.reply(`
+<b>🚫 Group Blocked</b>
+
+<blockquote><i>මෙම කණ්ඩායමට ප්‍රවේශය පරිපාලක විසින් අවහිර කර ඇත.
+වැඩි විස්තර හෝ සහාය සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+
+<b>📩 Contact:</b>
+<a href="https://t.me/mataberiyo">Admin</a>
+            `, { parse_mode: 'HTML' });
+            return false;
+        }
+        
+        // Check if group is in allowed list (if list is not empty)
+        if (GROUP_SETTINGS.allowed_groups.length > 0 && 
+            !GROUP_SETTINGS.allowed_groups.includes(chatId.toString())) {
+            await ctx.reply(`
+<b>🚫 Group Access Denied</b>
+
+<blockquote><i>මෙම කණ්ඩායමට භාවිතා කිරීමේ අවසර ලබා දී නොමැත.
+අවසර ලබා ගැනීම සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+
+<b>📩 Contact:</b>
+<a href="https://t.me/mataberiyo">Admin</a>
+            `, { parse_mode: 'HTML' });
+            return false;
+        }
+        
+        // Check chat control (enabled/disabled)
+        if (!isChatEnabled(chatId)) {
+            await ctx.reply(`
+<b>🚫 Chat Access Disabled</b>
+
+<blockquote><i>මෙම සංවාදය පරිපාලක විසින් අක්‍රිය කර ඇත.
+වැඩි විස්තර හෝ සහාය සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+
+<b>📩 Contact:</b>
+<a href="https://t.me/mataberiyo">Admin</a>
+            `, { parse_mode: 'HTML' });
+            return false;
+        }
+        
+        // Check pending approvals
+        if (CHAT_CONTROLS.pending_approvals.includes(chatId.toString())) {
+            await ctx.reply(`
+<b>⏳ Approval Pending</b>
+
+<blockquote><i>මෙම චැට් එක භාවිතා කිරීමට පෙර පරිපාලක අනුමැතිය අවශ්‍ය වේ.
+කරුණාකර Admin අනුමැතිය ලබා දෙන තුරු රැඳී සිටින්න.</i></blockquote>
+
+<b>📩 Contact:</b>
+<a href="https://t.me/mataberiyo">Admin</a>
+            `, { parse_mode: 'HTML' });
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // ----- CHECK CHANNEL -----
+    if (chatType === 'channel') {
+        if (!CHANNEL_SETTINGS.enabled) {
+            try {
+                await ctx.reply(`
+<b>🚫 Channels Disabled</b>
+
+<blockquote><i>මෙම චැනල් පහසුකම දැනට පරිපාලක විසින් අක්‍රිය කර ඇත.
+ප්‍රවේශය නැවත ලබා ගැනීමට Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+                `, { parse_mode: 'HTML' });
+            } catch (e) {}
+            return false;
+        }
+        
+        if (CHANNEL_SETTINGS.blocked_channels.includes(chatId.toString())) {
+            try {
+                await ctx.reply(`
+<b>🚫 Channel Blocked</b>
+
+<blockquote><i>මෙම චැනලයට ප්‍රවේශය පරිපාලක විසින් අවහිර කර ඇත.
+වැඩි විස්තර සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+                `, { parse_mode: 'HTML' });
+            } catch (e) {}
+            return false;
+        }
+        
+        if (CHANNEL_SETTINGS.allowed_channels.length > 0 && 
+            !CHANNEL_SETTINGS.allowed_channels.includes(chatId.toString())) {
+            try {
+                await ctx.reply(`
+<b>🚫 Channel Access Denied</b>
+
+<blockquote><i>මෙම චැනලයට භාවිතා කිරීමේ අවසර ලබා දී නොමැත.
+අවසර ලබා ගැනීම සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+                `, { parse_mode: 'HTML' });
+            } catch (e) {}
+            return false;
+        }
+        
+        if (!isChatEnabled(chatId)) {
+            try {
+                await ctx.reply(`
+<b>🚫 Channel Disabled</b>
+
+<blockquote><i>මෙම චැනලය දැනට පරිපාලක විසින් අක්‍රිය කර ඇත.
+නැවත ප්‍රවේශය ලබා ගැනීම සඳහා Admin සමඟ සම්බන්ධ වන්න.</i></blockquote>
+                `, { parse_mode: 'HTML' });
+            } catch (e) {}
+            return false;
+        }
+        
+        if (CHAT_CONTROLS.pending_approvals.includes(chatId.toString())) {
+            try {
+                await ctx.reply(`
+<b>⏳ Channel Approval Pending</b>
+
+<blockquote><i>මෙම චැනලය භාවිතා කිරීමට පෙර පරිපාලක අනුමැතිය අවශ්‍ය වේ.
+කරුණාකර Admin අනුමැතිය ලැබෙන තුරු රැඳී සිටින්න.</i></blockquote>
+                `, { parse_mode: 'HTML' });
+            } catch (e) {}
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Default: allow other chat types
+    return true;
+}
+
 async function checkAndEnableChat(ctx) {
     const chatId = ctx.chat.id;
     const chatType = ctx.chat.type;
@@ -173,11 +370,13 @@ async function checkAndEnableChat(ctx) {
     // Check if chat is disabled
     if (CHAT_CONTROLS.disabled_chats.includes(chatId.toString())) {
         await ctx.reply(`
-<b>⛔ This chat is disabled</b>
+<b>🚫 චැට් ප්‍රවේශය අවහිර කර ඇත</b>
 
-<i>This chat has been disabled by the administrator.</i>
+<blockquote><i>මෙම සංවාදය පරිපාලක විසින් තාවකාලිකව අක්‍රිය කර ඇත.
+ප්‍රවේශය නැවත ලබා ගැනීම සඳහා පරිපාලක සමඟ සම්බන්ධ වන්න.</i></blockquote>
 
-<b>📌 Contact:</b> <a href="https://t.me/mataberiyo">Admin</a>
+<b>📩 සහාය සඳහා:</b>
+<a href="https://t.me/mataberiyo">Contact Admin</a>
         `, { parse_mode: 'HTML' });
         return false;
     }
@@ -189,11 +388,13 @@ async function checkAndEnableChat(ctx) {
         // Check if already pending
         if (CHAT_CONTROLS.pending_approvals.includes(chatId.toString())) {
             await ctx.reply(`
-<b>⏳ Pending Approval</b>
+<b>⏳ Chat Approval Pending</b>
 
-<i>This chat is awaiting admin approval.</i>
+<blockquote><i>මෙම චැට් එක භාවිතා කිරීමට පෙර පරිපාලක අනුමැතිය අවශ්‍ය වේ.
+කරුණාකර Admin අනුමැතිය ලැබෙන තුරු රැඳී සිටින්න.</i></blockquote>
 
-<b>📌 Contact:</b> <a href="https://t.me/mataberiyo">Admin</a>
+<b>📩 සහාය සඳහා:</b>
+<a href="https://t.me/mataberiyo">Admin</a>
             `, { parse_mode: 'HTML' });
             return false;
         }
@@ -215,11 +416,12 @@ Use <code>/enable ${chatId}</code> or <code>/disable ${chatId}</code> to manage.
         `);
         
         await ctx.reply(`
-<b>⏳ Request Sent to Admin</b>
+<b>⏳ Approval Request Sent</b>
 
-<i>Your request has been sent to the administrator for approval.</i>
+<blockquote><i>ඔබගේ ප්‍රවේශ ඉල්ලීම Admin වෙත සාර්ථකව යවා ඇත.
+අනුමැතිය ලැබුණු පසු ඔබට දැනුම් දීමක් ලැබෙනු ඇත.</i></blockquote>
 
-<b>📌 You will be notified once approved.</b>
+<b>📌 කරුණාකර රැඳී සිටින්න.</b>
         `, { parse_mode: 'HTML' });
         return false;
     }
@@ -778,17 +980,17 @@ function formatVPNMessage(config, user) {
     let text = `
 <b>🔐 VPN Configuration Created</b>
 
-<b>👤 User:</b> <code>${user.first_name || user.username || user.id}</code>
+<blockquote><b>👤 User:</b> <code>${user.first_name || user.username || user.id}</code>
 <b>🆔 ID:</b> <code>${config.id}</code>
 <b>⏱ Duration:</b> <code>${config.duration}h</code>
 <b>⏰ Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
-<b>⏳ Remaining:</b> <code>${remaining}h</code>
+<b>⏳ Remaining:</b> <code>${remaining}h</code></blockquote>
 
-<b>📊 Status:</b>
-${progressBar}
+<code><b>📊 Status:</b>
+${progressBar}</code>
 
-<blockquote><b>🔗 Connection Link:</b>
-<code>${config.config.vless}</code></blockquote>
+<i>📋 Vless Config එක පිටපත් කිරීමට "Copy Link" ඔබන්න</i>
+<i>📱 ඔබගේ VPN Client එකෙන් Scan කිරීමට "Get QR Code" ඔබන්න</i>
     `;
 
     const buttons = [
@@ -847,20 +1049,17 @@ function formatConfigView(config, user) {
     let text = `
 <b>🔐 VPN Configuration</b>
 
-<b>👤 User:</b> <code>${user.first_name || user.username || user.id}</code>
+<blockquote><b>👤 User:</b> <code>${user.first_name || user.username || user.id}</code>
 <b>🆔 ID:</b> <code>${config.id}</code>
 <b>⏱ Duration:</b> <code>${config.duration}h</code>
 <b>⏰ Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
-<b>⏳ Remaining:</b> <code>${remaining}h</code>
+<b>⏳ Remaining:</b> <code>${remaining}h</code></blockquote>
 
-<b>📊 Status:</b>
-${progressBar}
+<code><b>📊 Status:</b>
+${progressBar}</code>
 
-<blockquote><b>🔗 Connection Link:</b>
-<code>${config.config.vless}</code></blockquote>
-
-<i>📋 Tap "Copy Link" to copy the connection string</i>
-<i>📱 Tap "Get QR Code" to scan with your VPN client</i>
+<i>📋 Vless Config එක පිටපත් කිරීමට "Copy Link" ඔබන්න</i>
+<i>📱 ඔබගේ VPN Client එකෙන් Scan කිරීමට "Get QR Code" ඔබන්න</i>
     `;
 
     const buttons = [
@@ -1194,16 +1393,22 @@ function getDeleteKeyboard(configs) {
 
 function getAdminKeyboard() {
     return [
-        [{ text: '🔄 Restart Xray', callback_data: 'admin_restart' }],
-        [{ text: '⏹ Stop Xray', callback_data: 'admin_stop' }],
-        [{ text: '▶️ Start Xray', callback_data: 'admin_start' }],
         [{ text: '📊 Xray Status', callback_data: 'admin_status' }],
-        [{ text: '🧹 Clean Expired', callback_data: 'admin_cleanup' }],
-        [{ text: '📈 System Stats', callback_data: 'admin_stats' }],
-        [{ text: '🔒 Private Mode', callback_data: 'admin_private_mode' }],
-        [{ text: '👥 Group Settings', callback_data: 'admin_group_settings' }],
-        [{ text: '📢 Channel Settings', callback_data: 'admin_channel_settings' }],
-        [{ text: '👤 User Management', callback_data: 'admin_user_management' }],
+        [   { text: '🔄 Restart Xray', callback_data: 'admin_restart' },
+            { text: '⏹ Stop Xray', callback_data: 'admin_stop' },
+            { text: '▶️ Start Xray', callback_data: 'admin_start' }
+        ],
+        [   { text: '🧹 Clean Expired', callback_data: 'admin_cleanup' },
+            { text: '📈 System Stats', callback_data: 'admin_stats' }
+        ],
+        [],
+        [   { text: '🔒 Private Mode', callback_data: 'admin_private_mode' },
+            { text: '👥 Group Settings', callback_data: 'admin_group_settings' }
+        ],
+        [],
+        [{ text: '📢 Channel Settings', callback_data: 'admin_channel_settings' },
+            { text: '👤 User Management', callback_data: 'admin_user_management' }
+        ],
         [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
     ];
 }
@@ -1397,84 +1602,25 @@ function setupBot() {
         return;
     }
 
-    // ========== MIDDLEWARE: CHECK PERMISSIONS ==========
+    // ========== MIDDLEWARE: CHECK PERMISSIONS - FIXED ==========
     bot.use(async (ctx, next) => {
         try {
-            // Skip if no chat or from
-            if (!ctx.chat || !ctx.from) return next();
-            
-            const chatType = ctx.chat.type;
-            const userId = ctx.from.id;
-            const chatId = ctx.chat.id;
-            const isOwner = userId.toString() === OWNER_ID;
-            
-            // Always allow owner
-            if (isOwner) return next();
-            
-            // Check private mode for private chats
-            if (chatType === 'private') {
-                if (!isPrivateUserAllowed(userId)) {
-                    await ctx.reply(`
-<b>⛔ Private Mode</b>
-
-<i>Private mode is enabled but you are not authorized.</i>
-
-<b>📌 Contact:</b> <a href="https://t.me/mataberiyo">Admin</a>
-                    `, { parse_mode: 'HTML' });
+            // Skip callback queries - they're handled by the action handlers
+            if (ctx.updateType === 'callback_query') {
+                // Still check permissions for callback queries
+                const allowed = await checkPermissions(ctx);
+                if (!allowed) {
+                    await ctx.answerCbQuery('⛔ You are not authorized to use this bot.');
                     return;
                 }
                 return next();
             }
             
-            // Check group permissions
-            if (chatType === 'group' || chatType === 'supergroup') {
-                if (!isGroupAllowed(chatId)) {
-                    await ctx.reply(`
-<b>⛔ Group Not Allowed</b>
-
-<i>This group is not allowed to use the bot.</i>
-
-<b>📌 Contact:</b> <a href="https://t.me/mataberiyo">Admin</a>
-                    `, { parse_mode: 'HTML' });
-                    return;
-                }
-                
-                // Check if chat needs approval
-                const canProceed = await checkAndEnableChat(ctx);
-                if (!canProceed) return;
-            }
-            
-            // Check channel permissions
-            if (chatType === 'channel') {
-                if (!isChannelAllowed(chatId)) {
-                    // Try to send a message (may not work in channels)
-                    try {
-                        await ctx.reply(`
-<b>⛔ Channel Not Allowed</b>
-
-<i>This channel is not allowed to use the bot.</i>
-                        `, { parse_mode: 'HTML' });
-                    } catch (error) {
-                        // Channels may not allow replies
-                        console.log('Could not reply in channel:', error.message);
-                    }
-                    return;
-                }
-                
-                // Check if channel needs approval
-                const canProceed = await checkAndEnableChat(ctx);
-                if (!canProceed) {
-                    try {
-                        await ctx.reply(`
-<b>⏳ Pending Approval</b>
-
-<i>This channel is awaiting admin approval.</i>
-                        `, { parse_mode: 'HTML' });
-                    } catch (error) {
-                        console.log('Could not reply in channel:', error.message);
-                    }
-                    return;
-                }
+            // For regular messages and other updates
+            const allowed = await checkPermissions(ctx);
+            if (!allowed) {
+                // Don't continue if not allowed
+                return;
             }
             
             return next();
@@ -2195,24 +2341,28 @@ ${createLoadingBar(100, '🟩')}
         }
         
         const text = `
-⚙️ <b>Admin Panel</b>
+⚙️ <b>පරිපාලක පැනලය (Admin Panel)</b>
 
 ━━━━━━━━━━━━━━━━━━━━━━
-<i>පද්ධතිය කළමනාකරණය:</i>
+<i>🛠️ පද්ධති කළමනාකරණ විකල්ප</i>
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<blockquote>🔄 <b>Restart Xray</b> - Restart the VPN service
-⏹  <b>Stop Xray</b> - Stop the VPN service
-▶️ <b>Start Xray</b> - Start the VPN service
-📊 <b>Xray Status</b> - Check service status
-🧹 <b>Clean Expired</b> - Remove old configs
-📈 <b>System Stats</b> - View system info
-🔒 <b>Private Mode</b> - Manage private users
-👥 <b>Group Settings</b> - Manage group access
-📢 <b>Channel Settings</b> - Manage channel access
-👤 <b>User Management</b> - Manage users</blockquote>
+<blockquote>
+🔄 <b>Restart Xray</b> - VPN සේවාව නැවත ආරම්භ කරන්න
+⏹ <b>Stop Xray</b> - VPN සේවාව නවත්වන්න
+▶️ <b>Start Xray</b> - VPN සේවාව ආරම්භ කරන්න
+📊 <b>Xray Status</b> - සේවා තත්ත්වය පරීක්ෂා කරන්න
+🧹 <b>Clean Expired</b> - කල් ඉකුත් වූ Config ඉවත් කරන්න
+📈 <b>System Stats</b> - Server තොරතුරු බලන්න
+🔒 <b>Private Mode</b> - Private User කළමනාකරණය කරන්න
+👥 <b>Group Settings</b> - Group ප්‍රවේශය කළමනාකරණය කරන්න
+📢 <b>Channel Settings</b> - Channel ප්‍රවේශය කළමනාකරණය කරන්න
+👤 <b>User Management</b> - User ගිණුම් කළමනාකරණය කරන්න
+</blockquote>
 
-<code>♻ පහත සදහන් විකල්ප භාවිත කරන්න.</code>
+━━━━━━━━━━━━━━━━━━━━━━
+
+<code>♻️ අවශ්‍ය ක්‍රියාව තෝරා පද්ධතිය කළමනාකරණය කරන්න.</code>
         `;
         await editWithImage(ctx, text, getAdminKeyboard());
     });
@@ -2232,11 +2382,11 @@ ${createLoadingBar(100, '🟩')}
 <b>Blocked Users:</b> <code>${PRIVATE_MODE.blocked_users.length}</code>
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<b>📌 How it works:</b>
-• When enabled, only allowed users can use the bot
-• Blocked users are always denied access
-• If allowed list is empty, all users are allowed
-• Owner is always allowed regardless of settings
+<blockquote><b>📌 මෙය ක්‍රියා කරන ආකාරය:</b>
+• Enabled කළ විට, අවසර ලබා දී ඇති Users පමණක් Bot එක භාවිතා කළ හැක.
+• Block කර ඇති Users හට සෑම විටම ප්‍රවේශය ප්‍රතික්ෂේප වේ.
+• Allowed List එක හිස් නම්, සියලුම Users සඳහා ප්‍රවේශය ලබා දේ.
+• Owner හට Settings කුමක් වුවත් සෑම විටම ප්‍රවේශය හිමි වේ.</blockquote>
 
 <i>Use the buttons below to manage private mode.</i>
         `;
@@ -2280,11 +2430,11 @@ ${PRIVATE_MODE.enabled ? '⚠️ Only allowed users can use the bot.' : '✅ All
 <b>Pending Approvals:</b> <code>${CHAT_CONTROLS.pending_approvals.length}</code>
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<b>📌 How it works:</b>
-• When enabled, groups can use the bot (subject to rules)
-• Blocked groups are always denied access
-• If allowed list is empty, all groups are allowed
-• Auto-enable: new groups are automatically enabled
+<blockquote><<b>📌 මෙය ක්‍රියා කරන ආකාරය:</b>
+• Enabled කළ විට, නියමයන්ට අනුව Groups වලට Bot එක භාවිතා කළ හැක.
+• Block කර ඇති Groups හට සෑම විටම ප්‍රවේශය ප්‍රතික්ෂේප වේ.
+• Allowed List එක හිස් නම්, සියලුම Groups සඳහා ප්‍රවේශය ලබා දේ.
+• Auto-enable: නව Groups ස්වයංක්‍රීයව Enable කරනු ලැබේ.</blockquote><
 
 <i>Use the buttons below to manage group settings.</i>
         `;
@@ -2370,10 +2520,10 @@ ${ADMIN_SETTINGS.auto_enable_new_groups ? '✅ New groups can use the bot immedi
 <b>Blocked Channels:</b> <code>${CHANNEL_SETTINGS.blocked_channels.length}</code>
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<b>📌 How it works:</b>
-• When enabled, channels can use the bot (subject to rules)
-• Blocked channels are always denied access
-• If allowed list is empty, all channels are allowed
+<blockquote><b>📌 මෙය ක්‍රියා කරන ආකාරය:</b>
+• Enabled කළ විට, නියමයන්ට අනුව Channels වලට Bot එක භාවිතා කළ හැක.
+• Block කර ඇති Channels හට සෑම විටම ප්‍රවේශය ප්‍රතික්ෂේප වේ.
+• Allowed List එක හිස් නම්, සියලුම Channels සඳහා ප්‍රවේශය ලබා දේ.</blockquote>
 
 <i>Use the buttons below to manage channel settings.</i>
         `;
