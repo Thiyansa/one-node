@@ -7,5 +7,10 @@
     "start": "node app.js"
   },
   "author": "Thiyansa",
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [],
+  "type": "commonjs",
+  "dependencies": {
+    "telegraf": "^4.16.3"
+  }
 }
