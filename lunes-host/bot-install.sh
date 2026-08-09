@@ -3,7 +3,7 @@
 DOMAIN="${DOMAIN:-node68.lunes.host}"
 PORT="${PORT:-10808}"
 UUID="${UUID:-2584b733-9095-4bec-a7d5-62b473540f7a}"
-PATH="${PATH:-/kudda-vpn}"
+PATH="${|VLESS_PATH:-/kudda-vpn}"
 BOT_TOKEN="${TOKEN:-https://t.me/mataberiyo}"
 OWNER_ID="${OWNER:-https://t.me/mataberiyo}"
 
@@ -19,7 +19,7 @@ sed -i "s|YOUR_TG_BOT_API_KEY|$TOKEN|g" db.json
 sed -i "s|YOUR_TG_ID|$OWNER|g" db.json
 sed -i "s|YOUR_DOMAIN|$DOMAIN|g" db.json
 sed -i "s|10808|$PORT|g" db.json
-sed -i "s|YOUR_PATH|$PATH|g" db.json
+sed -i "s|YOUR_PATH||$VLESS_PATH|g" db.json
 
 npm install
 
@@ -39,7 +39,7 @@ publicKey=$(echo "$keyPair" | grep "Public key" | awk '{print $3}')
 sed -i "s/YOUR_PRIVATE_KEY/$privateKey/g" config.json
 shortId=$(openssl rand -hex 4)
 sed -i "s/YOUR_SHORT_ID/$shortId/g" config.json
-vlessUrl="vless://$UUID@$DOMAIN:$PORT?encryption=none&security=none&type=ws&host=www.cloudflare.com&path=/kudda-vpn#KUDDA-Vless+Ws"
+vlessUrl="vless://$UUID@$DOMAIN:$PORT?encryption=none&security=none&type=ws&host=www.cloudflare.com&path=/$VLESS_PATH#KUDDA-Vless+Ws"
 echo $vlessUrl > /home/container/node.txt
 
 echo "============================================================"
