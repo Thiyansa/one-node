@@ -17,13 +17,14 @@ mv xray xy
 curl -sSL -o config.json https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/lunes-host/xray-config.json
 sed -i "s/10808/$PORT/g" config.json
 sed -i "s/YOUR_UUID/$UUID/g" config.json
+
 keyPair=$(./xy x25519)
 privateKey=$(echo "$keyPair" | grep "Private key" | awk '{print $3}')
 publicKey=$(echo "$keyPair" | grep "Public key" | awk '{print $3}')
 sed -i "s/YOUR_PRIVATE_KEY/$privateKey/g" config.json
 shortId=$(openssl rand -hex 4)
 sed -i "s/YOUR_SHORT_ID/$shortId/g" config.json
-vlessUrl="vless://$UUID@$DOMAIN:$PORT?encryption=none&security=none&type=ws&host=www.cloudflare.com&path=/Fkudda-vpn#KUDDA-Vless+Ws"
+vlessUrl="vless://$UUID@$DOMAIN:$PORT?encryption=none&security=none&type=ws&host=www.cloudflare.com&path=/kudda-vpn#KUDDA-Vless+Ws"
 echo $vlessUrl > /home/container/node.txt
 
 echo "============================================================"
