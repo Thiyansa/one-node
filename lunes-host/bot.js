@@ -2430,11 +2430,11 @@ ${PRIVATE_MODE.enabled ? '⚠️ Only allowed users can use the bot.' : '✅ All
 <b>Pending Approvals:</b> <code>${CHAT_CONTROLS.pending_approvals.length}</code>
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<blockquote><<b>📌 මෙය ක්‍රියා කරන ආකාරය:</b>
+<blockquote><b>📌 මෙය ක්‍රියා කරන ආකාරය:</b>
 • Enabled කළ විට, නියමයන්ට අනුව Groups වලට Bot එක භාවිතා කළ හැක.
 • Block කර ඇති Groups හට සෑම විටම ප්‍රවේශය ප්‍රතික්ෂේප වේ.
 • Allowed List එක හිස් නම්, සියලුම Groups සඳහා ප්‍රවේශය ලබා දේ.
-• Auto-enable: නව Groups ස්වයංක්‍රීයව Enable කරනු ලැබේ.</blockquote><
+• Auto-enable: නව Groups ස්වයංක්‍රීයව Enable කරනු ලැබේ.</blockquote>
 
 <i>Use the buttons below to manage group settings.</i>
         `;
