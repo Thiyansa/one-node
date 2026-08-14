@@ -21,7 +21,50 @@ let CHAT_CONTROLS = { enabled_chats: [], disabled_chats: [], pending_approvals: 
 
 // ==================== NO CACHING - DIRECT FILE ACCESS ====================
 
-// Load configuration from db.json
+// ==================== RESTART DEBOUNCE SYSTEM ====================
+let restartTimer = null;
+let restartInProgress = false;
+let intentionalXrayStop = false;
+let pendingXrayRestart = false;
+let ownerPendingAction = null;
+let restartQueue = [];
+let isRestarting = false;
+let lastRestartTime = 0;
+const MIN_RESTART_INTERVAL = 2000; // 2 seconds minimum
+const MAX_RESTART_QUEUE = 5;
+const MAX_CPU_PERCENT = 13;
+const MAX_RAM_MB = 100;
+
+// ===== NEW: Resource Monitor =====
+function checkResourceLimits() {
+    const memUsage = process.memoryUsage();
+    const memMB = memUsage.heapUsed / 1024 / 1024;
+    const cpuUsage = process.cpuUsage();
+    const cpuPercent = (cpuUsage.user + cpuUsage.system) / 1000000; // Approximate
+    
+    return {
+        memoryOK: memMB < MAX_RAM_MB,
+        cpuOK: cpuPercent < MAX_CPU_PERCENT,
+        memMB: memMB,
+        cpuPercent: cpuPercent
+    };
+}
+
+async function waitForResources() {
+    let attempts = 0;
+    while (attempts < 30) { // Max 30 seconds wait
+        const status = checkResourceLimits();
+        if (status.memoryOK && status.cpuOK) {
+            return true;
+        }
+        console.log(`⏳ Waiting for resources... CPU: ${status.cpuPercent.toFixed(1)}%, RAM: ${status.memMB.toFixed(1)}MB`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        attempts++;
+    }
+    return false;
+}
+
+// ==================== LOAD CONFIGURATION ====================
 async function loadConfig() {
     try {
         const configData = await fsPromises.readFile(path.join(__dirname, 'db.json'), 'utf8');
@@ -33,6 +76,7 @@ async function loadConfig() {
         PORT = CONFIG.port;
         PATH = CONFIG.path || '/kudda-vpn';
         IMAGE_URL = CONFIG.image_url || '';
+        VLESS_HOST = CONFIG.vless_host || 'm.zoom.us';
         
         // Load private mode settings
         PRIVATE_MODE = CONFIG.private_mode || { enabled: false, allowed_users: [], blocked_users: [] };
@@ -50,6 +94,7 @@ async function loadConfig() {
         console.log(`🔒 Private Mode: ${PRIVATE_MODE.enabled ? '✅ Enabled' : '❌ Disabled'}`);
         console.log(`👥 Group Settings: ${GROUP_SETTINGS.enabled ? '✅ Enabled' : '❌ Disabled'}`);
         console.log(`📢 Channel Settings: ${CHANNEL_SETTINGS.enabled ? '✅ Enabled' : '❌ Disabled'}`);
+        console.log(`🌐 VLESS Host: ${VLESS_HOST}`);
         
         if (!BOT_TOKEN) {
             console.error('❌ BOT_TOKEN is missing from db.json!');
@@ -74,6 +119,91 @@ async function loadConfig() {
         console.error('Make sure db.json exists in the same directory with required fields.');
         return false;
     }
+}
+
+// ==================== HELPER: ESCAPE HTML ====================
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// ==================== HELPER: ATOMIC JSON WRITE ====================
+async function writeJsonAtomic(filePath, data) {
+    const tempPath = `${filePath}.tmp`;
+    
+    const json = JSON.stringify(data, null, 2);
+    
+    // Validate before writing
+    JSON.parse(json);
+    
+    await fsPromises.writeFile(tempPath, json, 'utf8');
+    await fsPromises.rename(tempPath, filePath);
+}
+
+async function readJsonSafe(filePath, fallback = null) {
+    try {
+        const data = await fsPromises.readFile(filePath, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.error(`Error reading JSON ${filePath}:`, error.message);
+        return fallback;
+    }
+}
+
+// ==================== HELPER: NOTIFY USER ====================
+async function notifyUser(userId, message) {
+    try {
+        if (!bot) return false;
+        
+        await bot.telegram.sendMessage(userId, message, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+        });
+        
+        return true;
+    } catch (error) {
+        console.error(`Failed to notify user ${userId}:`, error.message);
+        return false;
+    }
+}
+
+// ==================== VALIDATE XRAY CONFIG ====================
+async function validateXrayConfig(configPath) {
+    return new Promise((resolve) => {
+        const testProcess = spawn(XRAY_BINARY, ['test', '-c', configPath]);
+        
+        let errorOutput = '';
+        let output = '';
+        
+        testProcess.stdout.on('data', data => {
+            output += data.toString();
+        });
+        
+        testProcess.stderr.on('data', data => {
+            errorOutput += data.toString();
+        });
+        
+        testProcess.on('exit', code => {
+            if (code === 0) {
+                resolve({ valid: true, output: output });
+            } else {
+                resolve({ valid: false, error: errorOutput || output });
+            }
+        });
+        
+        testProcess.on('error', (err) => {
+            resolve({ valid: false, error: err.message });
+        });
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+            testProcess.kill();
+            resolve({ valid: false, error: 'Validation timeout' });
+        }, 10000);
+    });
 }
 
 // ==================== CHECK PERMISSIONS - FIXED ====================
@@ -407,10 +537,10 @@ async function checkAndEnableChat(ctx) {
         await notifyOwner(`
 🆕 <b>New Chat Request</b>
 
-<b>Chat ID:</b> <code>${chatId}</code>
-<b>Type:</b> <code>${chatType}</code>
-<b>Title:</b> <code>${ctx.chat.title || 'Private'}</code>
-<b>User:</b> <code>${ctx.from.username || ctx.from.first_name}</code>
+<b>Chat ID:</b> <code>${escapeHtml(chatId)}</code>
+<b>Type:</b> <code>${escapeHtml(chatType)}</code>
+<b>Title:</b> <code>${escapeHtml(ctx.chat.title || 'Private')}</code>
+<b>User:</b> <code>${escapeHtml(ctx.from.username || ctx.from.first_name)}</code>
 
 Use <code>/enable ${chatId}</code> or <code>/disable ${chatId}</code> to manage.
         `);
@@ -446,10 +576,7 @@ async function updateDbConfig() {
         CONFIG.admin_settings = ADMIN_SETTINGS;
         CONFIG.chat_controls = CHAT_CONTROLS;
         
-        await fsPromises.writeFile(
-            path.join(__dirname, 'db.json'),
-            JSON.stringify(CONFIG, null, 2)
-        );
+        await writeJsonAtomic(path.join(__dirname, 'db.json'), CONFIG);
         return true;
     } catch (error) {
         console.error('Error updating db.json:', error);
@@ -768,7 +895,7 @@ let bot = null;
 let xrayProcess = null;
 let isXrayRunning = false;
 let xrayRestartCount = 0;
-let lastRestartTime = Date.now();
+let VLESS_HOST = 'm.zoom.us';
 
 // ==================== XRAY MANAGEMENT ====================
 async function getXrayConfigSettings() {
@@ -800,10 +927,184 @@ async function checkXrayBinary() {
     }
 }
 
+// ===== IMPROVED: Scheduled Restart with Queue =====
+function scheduleXrayRestart(reason = 'config changed', immediate = true) {
+    // Add to queue
+    restartQueue.push({
+        reason: reason,
+        timestamp: Date.now()
+    });
+    
+    // Limit queue size
+    if (restartQueue.length > MAX_RESTART_QUEUE) {
+        restartQueue.shift();
+    }
+    
+    // If already restarting, just mark pending
+    if (restartInProgress) {
+        pendingXrayRestart = true;
+        console.log(`⏳ Xray restart already in progress, queued: ${reason}`);
+        return;
+    }
+    
+    // Clear existing timer
+    if (restartTimer) {
+        clearTimeout(restartTimer);
+        restartTimer = null;
+    }
+    
+    // Immediate or delayed restart
+    const delay = immediate ? 500 : 3000; // 500ms for immediate, 3s for delayed
+    
+    restartTimer = setTimeout(async () => {
+        restartTimer = null;
+        
+        if (restartInProgress) {
+            pendingXrayRestart = true;
+            return;
+        }
+        
+        // Check if we have queued restarts
+        if (restartQueue.length === 0) {
+            return;
+        }
+        
+        // Check resource limits before restart
+        const resourcesOK = await waitForResources();
+        if (!resourcesOK) {
+            console.log('⚠️ Resources not available, retrying in 5 seconds...');
+            setTimeout(() => {
+                scheduleXrayRestart('resource retry', true);
+            }, 5000);
+            return;
+        }
+        
+        restartInProgress = true;
+        pendingXrayRestart = false;
+        
+        try {
+            const queueReasons = restartQueue.map(q => q.reason).join(', ');
+            console.log(`🔄 Xray restarting: ${queueReasons}`);
+            
+            // Kill existing process gently
+            if (xrayProcess) {
+                try {
+                    xrayProcess.kill('SIGTERM');
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    if (xrayProcess) {
+                        xrayProcess.kill('SIGKILL');
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                } catch (e) {
+                    console.log('Process kill error:', e.message);
+                }
+                xrayProcess = null;
+                isXrayRunning = false;
+            }
+            
+            // Clear queue
+            restartQueue = [];
+            
+            // Start Xray
+            const started = await startXray();
+            
+            if (started) {
+                console.log('✅ Xray restarted successfully');
+                lastRestartTime = Date.now();
+            } else {
+                console.log('❌ Xray restart failed, will retry...');
+                // Retry after 5 seconds
+                setTimeout(() => {
+                    scheduleXrayRestart('retry after failure', true);
+                }, 5000);
+            }
+            
+        } catch (error) {
+            console.error('Xray restart failed:', error);
+            // Retry after 5 seconds
+            setTimeout(() => {
+                scheduleXrayRestart('retry after error', true);
+            }, 5000);
+        } finally {
+            restartInProgress = false;
+            
+            // Check if there are pending restarts
+            if (pendingXrayRestart || restartQueue.length > 0) {
+                pendingXrayRestart = false;
+                scheduleXrayRestart('pending queue', true);
+            }
+        }
+    }, delay);
+}
+
+// ==================== CHECK XRAY PERMISSIONS ====================
+async function checkXrayPermissions() {
+    try {
+        // Check if binary exists
+        await fsPromises.access(XRAY_BINARY, fs.constants.F_OK);
+        
+        // Check if binary is executable
+        try {
+            await fsPromises.access(XRAY_BINARY, fs.constants.X_OK);
+            return { exists: true, executable: true };
+        } catch {
+            // Not executable - try to fix
+            console.log('⚠️ Xray binary is not executable. Attempting to fix...');
+            try {
+                // Try to make it executable using chmod
+                const { exec } = require('child_process');
+                await new Promise((resolve, reject) => {
+                    exec(`chmod +x "${XRAY_BINARY}"`, (error, stdout, stderr) => {
+                        if (error) {
+                            console.error('chmod error:', error);
+                            reject(error);
+                        } else {
+                            console.log('✅ Xray binary made executable');
+                            resolve();
+                        }
+                    });
+                });
+                
+                // Check again
+                await fsPromises.access(XRAY_BINARY, fs.constants.X_OK);
+                return { exists: true, executable: true };
+            } catch (chmodError) {
+                console.error('Failed to make Xray executable:', chmodError);
+                return { exists: true, executable: false };
+            }
+        }
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            return { exists: false, executable: false };
+        }
+        console.error('Error checking Xray permissions:', error);
+        return { exists: false, executable: false };
+    }
+}
+
+// ===== IMPROVED: startXray with resource limits =====
 async function startXray() {
     try {
-        if (!await checkXrayBinary()) {
-            console.error('Xray binary not found!');
+        // Check resources before starting
+        const resourcesOK = await waitForResources();
+        if (!resourcesOK) {
+            console.log('⚠️ Resources not available for Xray start, will retry...');
+            setTimeout(() => startXray(), 5000);
+            return false;
+        }
+        
+        // Check binary permissions first
+        const permCheck = await checkXrayPermissions();
+        
+        if (!permCheck.exists) {
+            console.error('Xray binary not found at:', XRAY_BINARY);
+            await notifyOwner(`❌ Xray binary not found at:\n<code>${XRAY_BINARY}</code>\n\nPlease ensure Xray is installed correctly.`);
+            return false;
+        }
+        
+        if (!permCheck.executable) {
+            console.error('Xray binary is not executable!');
+            await notifyOwner(`❌ Xray binary is not executable:\n<code>${XRAY_BINARY}</code>\n\nPlease run: <code>chmod +x ${XRAY_BINARY}</code>`);
             return false;
         }
 
@@ -811,41 +1112,65 @@ async function startXray() {
             await fsPromises.access(XRAY_CONFIG);
         } catch {
             console.error('Xray config not found!');
+            await notifyOwner(`❌ Xray config not found at:\n<code>${XRAY_CONFIG}</code>`);
             return false;
         }
+
+        intentionalXrayStop = false;
 
         if (xrayProcess) {
             try {
                 xrayProcess.kill();
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
                 console.error('Error killing existing process:', error);
             }
         }
 
         const args = ['run', '-c', XRAY_CONFIG];
-        xrayProcess = spawn(XRAY_BINARY, args);
+        xrayProcess = spawn(XRAY_BINARY, args, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
         isXrayRunning = true;
-        xrayRestartCount = 0;
 
-        xrayProcess.stdout.on('data', (data) => {
-            console.log(`[XRAY]: ${data.toString()}`);
+        // Minimal logging to save resources
+        xrayProcess.stdout.on('data', () => {
+            // Ignore stdout to save CPU
         });
 
         xrayProcess.stderr.on('data', (data) => {
-            console.error(`[XRAY ERR]: ${data.toString()}`);
+            const msg = data.toString();
+            if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('failed')) {
+                console.error(`[XRAY ERR]: ${msg.slice(0, 200)}`);
+            }
         });
 
         xrayProcess.on('error', (error) => {
             console.error('Xray process error:', error);
             isXrayRunning = false;
+            
+            if (error.code === 'EACCES') {
+                console.error('Permission denied! Trying to fix...');
+                try {
+                    const { exec } = require('child_process');
+                    exec(`chmod +x "${XRAY_BINARY}"`, async (chmodError) => {
+                        if (!chmodError) {
+                            console.log('✅ Fixed permissions, restarting Xray...');
+                            setTimeout(() => startXray(), 1000);
+                        }
+                    });
+                } catch (fixError) {
+                    console.error('Failed to fix permissions:', fixError);
+                }
+            }
         });
 
         xrayProcess.on('exit', (code) => {
             console.log(`Xray exited with code: ${code}`);
             isXrayRunning = false;
             
-            if (code !== 0) {
+            if (code !== 0 && code !== null && !intentionalXrayStop) {
+                // Auto-restart on crash with backoff
                 const now = Date.now();
                 const timeSinceLastRestart = now - lastRestartTime;
                 
@@ -856,19 +1181,26 @@ async function startXray() {
                 xrayRestartCount++;
                 lastRestartTime = now;
                 
-                const backoffDelay = Math.min(30000, xrayRestartCount * 5000);
+                const backoffDelay = Math.min(30000, xrayRestartCount * 3000);
                 
-                console.log(`Restarting Xray in ${backoffDelay/1000}s (attempt ${xrayRestartCount})`);
+                console.log(`Xray crashed, restarting in ${backoffDelay/1000}s (attempt ${xrayRestartCount})`);
                 
                 setTimeout(async () => {
-                    if (xrayRestartCount < 10) {
+                    if (xrayRestartCount < 10 && !intentionalXrayStop) {
                         await startXray();
-                    } else {
+                    } else if (xrayRestartCount >= 10) {
                         console.error('Xray restart limit reached!');
                         notifyOwner('⚠️ Xray restart limit reached! Manual intervention required.');
                     }
                 }, backoffDelay);
             }
+            
+            // Reset restart count after successful long run
+            setTimeout(() => {
+                if (isXrayRunning) {
+                    xrayRestartCount = 0;
+                }
+            }, 60000);
         });
 
         console.log('✅ Xray started!');
@@ -879,16 +1211,33 @@ async function startXray() {
     }
 }
 
-async function stopXray() {
+// ===== IMPROVED: stopXray =====
+async function stopXray(manual = true) {
     try {
+        if (manual) {
+            intentionalXrayStop = true;
+            // Clear restart queue
+            restartQueue = [];
+            if (restartTimer) {
+                clearTimeout(restartTimer);
+                restartTimer = null;
+            }
+        }
+        
         if (xrayProcess) {
             xrayProcess.kill('SIGTERM');
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            if (xrayProcess) {
+                xrayProcess.kill('SIGKILL');
+            }
+            
             xrayProcess = null;
             isXrayRunning = false;
             console.log('✅ Xray stopped!');
             return true;
         }
+        
         return false;
     } catch (error) {
         console.error('Error stopping Xray:', error);
@@ -896,10 +1245,11 @@ async function stopXray() {
     }
 }
 
+// ===== IMPROVED: restartXray =====
 async function restartXray() {
-    await stopXray();
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    return await startXray();
+    // Use the scheduled restart system
+    scheduleXrayRestart('manual restart', true);
+    return true;
 }
 
 async function getXrayStatus() {
@@ -947,7 +1297,7 @@ async function saveUserData(userId, userData) {
         const data = await fsPromises.readFile(DATA_FILE, 'utf8');
         const users = JSON.parse(data);
         users[userId] = userData;
-        await fsPromises.writeFile(DATA_FILE, JSON.stringify(users, null, 2));
+        await writeJsonAtomic(DATA_FILE, users);
         return true;
     } catch (error) {
         console.error('Error saving user data:', error);
@@ -977,14 +1327,22 @@ function formatVPNMessage(config, user) {
     const expiryDate = new Date(config.expiryTime);
     const progressBar = createProgressBar(remaining, config.duration);
     
+    // දින ගණන ගණනය කරන්න
+    let durationDisplay = `${config.duration}h`;
+    if (config.duration >= 24) {
+        const days = Math.floor(config.duration / 24);
+        const hours = config.duration % 24;
+        durationDisplay = hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+    }
+
     let text = `
 <b>🔐 VPN Configuration Created</b>
 
-<blockquote><b>👤 User:</b> <code>${user.first_name || user.username || user.id}</code>
-<b>🆔 ID:</b> <code>${config.id}</code>
-<b>⏱ Duration:</b> <code>${config.duration}h</code>
+<blockquote><b>👤 User:</b> <code>${escapeHtml(user.first_name || user.username || user.id)}</code>
+<b>🆔 ID:</b> <code>${escapeHtml(config.id)}</code>
+<b>⏱ Duration:</b> <code>${escapeHtml(durationDisplay)}</code>
 <b>⏰ Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
-<b>⏳ Remaining:</b> <code>${remaining}h</code></blockquote>
+<b>⏳ Remaining:</b> <code>${escapeHtml(remaining)}h</code></blockquote>
 
 <code><b>📊 Status:</b>
 ${progressBar}</code>
@@ -1032,10 +1390,9 @@ function formatConfigList(configs, userId) {
         message += `
 <blockquote><b>🔹 ${config.duration}h VPN</b>
 ${bar}
-<b>ID:</b> <code>${config.id}</code>
+<b>ID:</b> <code>${escapeHtml(config.id)}</code>
 <b>Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
 <b>⌛ ${remaining}h remaining</b></blockquote>\n`;
-
     }
     
     return { text: message, parse_mode: 'HTML' };
@@ -1045,15 +1402,23 @@ function formatConfigView(config, user) {
     const remaining = Math.ceil((config.expiryTime - Date.now()) / (1000 * 60 * 60));
     const expiryDate = new Date(config.expiryTime);
     const progressBar = createProgressBar(remaining, config.duration);
+
+    // දින ගණන ගණනය කරන්න
+    let durationDisplay = `${config.duration}h`;
+    if (config.duration >= 24) {
+        const days = Math.floor(config.duration / 24);
+        const hours = config.duration % 24;
+        durationDisplay = hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+    }
     
     let text = `
 <b>🔐 VPN Configuration</b>
 
-<blockquote><b>👤 User:</b> <code>${user.first_name || user.username || user.id}</code>
-<b>🆔 ID:</b> <code>${config.id}</code>
-<b>⏱ Duration:</b> <code>${config.duration}h</code>
+<blockquote><b>👤 User:</b> <code>${escapeHtml(user.first_name || user.username || user.id)}</code>
+<b>🆔 ID:</b> <code>${escapeHtml(config.id)}</code>
+<b>⏱ Duration:</b> <code>${escapeHtml(durationDisplay)}</code>
 <b>⏰ Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
-<b>⏳ Remaining:</b> <code>${remaining}h</code></blockquote>
+<b>⏳ Remaining:</b> <code>${escapeHtml(remaining)}h</code></blockquote>
 
 <code><b>📊 Status:</b>
 ${progressBar}</code>
@@ -1088,8 +1453,9 @@ async function generateVPNConfig(userId, duration) {
     const domain = DOMAIN;
     const port = xraySettings.port || PORT || 10808;
     const path = xraySettings.path || PATH || '/kudda-vpn';
+    const host = VLESS_HOST || 'm.zoom.us';
     
-    const vlessLink = `vless://${uuid}@${domain}:${port}?encryption=none&security=none&type=ws&host=m.zoom.us&path=${encodeURIComponent(path)}#VPN-${duration}h`;
+    const vlessLink = `vless://${uuid}@${domain}:${port}?encryption=none&security=none&type=ws&host=${encodeURIComponent(host)}&path=${encodeURIComponent(path)}#VPN-${duration}h`;
     
     const config = {
         id: configId,
@@ -1103,7 +1469,8 @@ async function generateVPNConfig(userId, duration) {
                 uuid: uuid,
                 domain: domain,
                 port: port,
-                path: path
+                path: path,
+                host: host
             }
         }
     };
@@ -1128,7 +1495,7 @@ async function saveVPNConfig(userId, config) {
         await updateXrayConfig(userId, config);
         
         const configPath = path.join(CONFIGS_DIR, `${config.id}.json`);
-        await fsPromises.writeFile(configPath, JSON.stringify(config, null, 2));
+        await writeJsonAtomic(configPath, config);
         
         return true;
     } catch (error) {
@@ -1137,33 +1504,131 @@ async function saveVPNConfig(userId, config) {
     }
 }
 
+// ==================== UPDATE XRAY CONFIG - IMPROVED with Immediate Restart ====================
 async function updateXrayConfig(userId, newConfig) {
     try {
-        const configData = await fsPromises.readFile(XRAY_CONFIG, 'utf8');
-        const xrayConfig = JSON.parse(configData);
+        const xrayConfig = await readJsonSafe(XRAY_CONFIG, null);
         
-        if (xrayConfig.inbounds && xrayConfig.inbounds.length > 0) {
-            const inbound = xrayConfig.inbounds[0];
-            if (!inbound.settings.clients) {
-                inbound.settings.clients = [];
-            }
-            
+        if (!xrayConfig) {
+            throw new Error('Invalid or missing Xray config');
+        }
+        
+        if (!Array.isArray(xrayConfig.inbounds) || xrayConfig.inbounds.length === 0) {
+            throw new Error('No inbound found in Xray config');
+        }
+        
+        const inbound = xrayConfig.inbounds[0];
+        
+        if (!inbound.settings) {
+            inbound.settings = {};
+        }
+        
+        if (!Array.isArray(inbound.settings.clients)) {
+            inbound.settings.clients = [];
+        }
+        
+        const uuid = newConfig.config.details.uuid;
+        
+        const alreadyExists = inbound.settings.clients.some(client => client.id === uuid);
+        
+        if (!alreadyExists) {
             inbound.settings.clients.push({
-                id: newConfig.config.details.uuid,
+                id: uuid,
                 email: `user_${userId}_${newConfig.id}`
             });
-            
-            if (!inbound.settings.decryption) {
-                inbound.settings.decryption = "none";
-            }
-            
-            await fsPromises.writeFile(XRAY_CONFIG, JSON.stringify(xrayConfig, null, 2));
-            
-            await restartXray();
         }
+        
+        if (!inbound.settings.decryption) {
+            inbound.settings.decryption = 'none';
+        }
+        
+        await writeJsonAtomic(XRAY_CONFIG, xrayConfig);
+        
+        // ===== IMMEDIATE RESTART - NO DELAY =====
+        // This is the key change - immediate restart with queue management
+        console.log(`🔄 Immediate Xray restart for new client: ${uuid}`);
+        scheduleXrayRestart('new client added', true); // immediate = true
+        
+        return true;
     } catch (error) {
         console.error('Error updating Xray config:', error);
         throw error;
+    }
+}
+
+// ===== IMPROVED: removeFromXrayConfig =====
+async function removeFromXrayConfig(uuid) {
+    try {
+        const xrayConfig = await readJsonSafe(XRAY_CONFIG, null);
+        
+        if (!xrayConfig) return false;
+        
+        if (!Array.isArray(xrayConfig.inbounds) || xrayConfig.inbounds.length === 0) {
+            return false;
+        }
+        
+        const inbound = xrayConfig.inbounds[0];
+        
+        if (!inbound.settings || !Array.isArray(inbound.settings.clients)) {
+            return false;
+        }
+        
+        const beforeCount = inbound.settings.clients.length;
+        
+        inbound.settings.clients = inbound.settings.clients.filter(client => client.id !== uuid);
+        
+        if (beforeCount !== inbound.settings.clients.length) {
+            await writeJsonAtomic(XRAY_CONFIG, xrayConfig);
+            scheduleXrayRestart('client removed', true);
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Error removing from Xray config:', error);
+        return false;
+    }
+}
+
+// ===== IMPROVED: removeMultipleFromXrayConfig =====
+async function removeMultipleFromXrayConfig(uuids = []) {
+    if (!uuids.length) return false;
+    
+    try {
+        const xrayConfig = await readJsonSafe(XRAY_CONFIG, null);
+        
+        if (!xrayConfig) return false;
+        
+        if (!Array.isArray(xrayConfig.inbounds) || xrayConfig.inbounds.length === 0) {
+            return false;
+        }
+        
+        const inbound = xrayConfig.inbounds[0];
+        
+        if (!inbound.settings || !Array.isArray(inbound.settings.clients)) {
+            return false;
+        }
+        
+        const uuidSet = new Set(uuids);
+        
+        const beforeCount = inbound.settings.clients.length;
+        
+        inbound.settings.clients = inbound.settings.clients.filter(client => {
+            return !uuidSet.has(client.id);
+        });
+        
+        const afterCount = inbound.settings.clients.length;
+        
+        if (beforeCount !== afterCount) {
+            await writeJsonAtomic(XRAY_CONFIG, xrayConfig);
+            scheduleXrayRestart('expired clients removed', true);
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Error removing multiple clients from Xray config:', error);
+        return false;
     }
 }
 
@@ -1228,64 +1693,74 @@ async function deleteUserConfig(userId, configId) {
     }
 }
 
-async function removeFromXrayConfig(uuid) {
-    try {
-        const configData = await fsPromises.readFile(XRAY_CONFIG, 'utf8');
-        const xrayConfig = JSON.parse(configData);
-        
-        if (xrayConfig.inbounds && xrayConfig.inbounds.length > 0) {
-            const inbound = xrayConfig.inbounds[0];
-            if (inbound.settings.clients) {
-                inbound.settings.clients = inbound.settings.clients.filter(
-                    client => client.id !== uuid
-                );
-                
-                await fsPromises.writeFile(XRAY_CONFIG, JSON.stringify(xrayConfig, null, 2));
-                await restartXray();
-            }
-        }
-    } catch (error) {
-        console.error('Error removing from Xray config:', error);
-    }
-}
-
-// ==================== CLEANUP ====================
+// ==================== CLEANUP EXPIRED CONFIGS - IMPROVED ====================
 async function cleanupExpiredConfigs() {
     try {
-        const data = await fsPromises.readFile(DATA_FILE, 'utf8');
-        const users = JSON.parse(data);
+        const users = await readJsonSafe(DATA_FILE, {});
         const now = Date.now();
+        
         let changes = false;
         let expiredCount = 0;
+        const expiredUuids = [];
         
         for (const [userId, userData] of Object.entries(users)) {
-            if (userData.configs) {
-                const validConfigs = userData.configs.filter(c => c.expiryTime > now);
-                const expiredConfigs = userData.configs.filter(c => c.expiryTime <= now);
+            if (!Array.isArray(userData.configs)) continue;
+            
+            const validConfigs = [];
+            const expiredConfigs = [];
+            
+            for (const config of userData.configs) {
+                if (config.expiryTime > now) {
+                    validConfigs.push(config);
+                } else {
+                    expiredConfigs.push(config);
+                }
+            }
+            
+            if (expiredConfigs.length > 0) {
                 expiredCount += expiredConfigs.length;
+                changes = true;
                 
                 for (const config of expiredConfigs) {
                     if (config.uuid) {
-                        await removeFromXrayConfig(config.uuid);
+                        expiredUuids.push(config.uuid);
                     }
                     
                     const configPath = path.join(CONFIGS_DIR, `${config.id}.json`);
+                    
                     try {
                         await fsPromises.unlink(configPath);
                     } catch (error) {
-                        console.error('Error deleting expired config file:', error);
+                        if (error.code !== 'ENOENT') {
+                            console.error('Error deleting expired config file:', error);
+                        }
                     }
+                    
+                    // Send expiry notification to user
+                    await notifyUser(userId, `
+<b>⏰ VPN Expired</b>
+
+<blockquote>
+ඔබගේ VPN Configuration එක කල් ඉකුත් වී ඇත.
+
+<b>Config ID:</b> <code>${escapeHtml(config.id)}</code>
+<b>Duration:</b> <code>${escapeHtml(config.duration)}h</code>
+</blockquote>
+
+නව VPN එකක් අවශ්‍ය නම් Bot එකෙන් නැවත Create කරන්න.
+`);
                 }
                 
-                if (validConfigs.length !== userData.configs.length) {
-                    userData.configs = validConfigs;
-                    changes = true;
-                }
+                userData.configs = validConfigs;
             }
         }
         
+        if (expiredUuids.length > 0) {
+            await removeMultipleFromXrayConfig(expiredUuids);
+        }
+        
         if (changes) {
-            await fsPromises.writeFile(DATA_FILE, JSON.stringify(users, null, 2));
+            await writeJsonAtomic(DATA_FILE, users);
         }
         
         return expiredCount;
@@ -1309,7 +1784,7 @@ function getMainKeyboard(userId) {
             { text: 'U', url: 'https://t.me/mataberiyo' },
             { text: 'D', url: 'https://t.me/mataberiyo' },
             { text: 'D', url: 'https://t.me/mataberiyo' },
-            { text: 'A', url: 'https://t.me/mataberiyo' },
+            { text: 'A', url: 'https://t.me/mataberiyo' }
         ],
         [{ text: '🙏 ඛන්ති පරමං තපෝ තිතික්ඛා 🌺', callback_data: 'Study' }]
     ];
@@ -1323,14 +1798,18 @@ function getMainKeyboard(userId) {
 
 function getDurationKeyboard(isOwner = false) {
     const durations = [
-        { label: '3 Hours', value: 3 },
-        { label: '7 Hours', value: 7 },
-        { label: '10 Hours', value: 10 },
-        { label: '12 Hours', value: 12 },
-        { label: '15 Hours', value: 15 },
-        { label: '18 Hours', value: 18 },
-        { label: '20 Hours', value: 20 },
-        { label: '24 Hours', value: 24 }
+        { label: '🕐 3 Hours', value: 3 },
+        { label: '🕖 7 Hours', value: 7 },
+        { label: '🕙 10 Hours', value: 10 },
+        { label: '🕛 12 Hours', value: 12 },
+        { label: '🕒 15 Hours', value: 15 },
+        { label: '🕕 18 Hours', value: 18 },
+        { label: '🕗 20 Hours', value: 20 },
+        { label: '🕛 24 Hours', value: 24 },
+        // දින විකල්ප (පැය වලට හරවනවා)
+        { label: '📅 3 Days (72h)', value: 72 },
+        { label: '📅 5 Days (120h)', value: 120 },
+        { label: '📅 7 Days (168h)', value: 168 }
     ];
     
     const buttons = durations.map(d => ({
@@ -1781,7 +2260,7 @@ function setupBot() {
         
         let text = '📋 <b>Pending Approvals</b>\n\n';
         for (const chatId of CHAT_CONTROLS.pending_approvals) {
-            text += `• <code>${chatId}</code>\n`;
+            text += `• <code>${escapeHtml(chatId)}</code>\n`;
         }
         text += '\nUse <code>/enable {chat_id}</code> or <code>/disable {chat_id}</code>';
         
@@ -1922,22 +2401,8 @@ VPN එක සැකසීමට අවශ්‍ය කාලය තොරන්
             }
         }
         
-        // Show loading - USING editTextSafe INSTEAD OF ctx.editMessageText
+        // Show loading - REDUCED ARTIFICIAL DELAYS
         const loadingText1 = `
-<b>⏳ Creating Your VPN...</b>
-
-<i>Generating secure configuration</i>
-
-<b>📊 Progress:</b>
-${createLoadingBar(25, '🟩')}
-
-<b>🔒 Setting up encryption...</b>
-        `;
-        await editTextSafe(ctx, loadingText1);
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const loadingText2 = `
 <b>⏳ Creating Your VPN...</b>
 
 <i>Generating secure configuration</i>
@@ -1945,27 +2410,13 @@ ${createLoadingBar(25, '🟩')}
 <b>📊 Progress:</b>
 ${createLoadingBar(50, '🟩')}
 
-<b>🔑 Generating UUID...</b>
+<i>Please wait...</i>
         `;
-        await editTextSafe(ctx, loadingText2);
+        await editTextSafe(ctx, loadingText1);
         
         await new Promise(resolve => setTimeout(resolve, 1500));
         
-        const loadingText3 = `
-<b>⏳ Creating Your VPN...</b>
-
-<i>Generating secure configuration</i>
-
-<b>📊 Progress:</b>
-${createLoadingBar(75, '🟩')}
-
-<b>🌐 Configuring network settings...</b>
-        `;
-        await editTextSafe(ctx, loadingText3);
-        
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        const loadingText4 = `
+        const loadingText2 = `
 <b>⏳ Creating Your VPN...</b>
 
 <i>Generating secure configuration</i>
@@ -1975,7 +2426,7 @@ ${createLoadingBar(100, '🟩')}
 
 <b>✅ Finalizing configuration...</b>
         `;
-        await editTextSafe(ctx, loadingText4);
+        await editTextSafe(ctx, loadingText2);
         
         await new Promise(resolve => setTimeout(resolve, 1000));
         
@@ -1997,7 +2448,7 @@ ${createLoadingBar(100, '🟩')}
                     
                     try {
                         const backupPath = path.join(CONFIGS_DIR, `backup_${config.id}.json`);
-                        await fsPromises.writeFile(backupPath, JSON.stringify(config, null, 2));
+                        await writeJsonAtomic(backupPath, config);
                         console.log('Config saved to backup file');
                     } catch (backupError) {
                         console.error('Failed to save backup:', backupError);
@@ -2034,6 +2485,8 @@ ${createLoadingBar(100, '🟩')}
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'custom_minutes';
+        
         const text = `
 <b>⚡ Custom Minutes</b>
 
@@ -2051,6 +2504,8 @@ ${createLoadingBar(100, '🟩')}
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'custom_hours';
+        
         const text = `
 <b>⚡ Custom Hours</b>
 
@@ -2067,6 +2522,8 @@ ${createLoadingBar(100, '🟩')}
         await ctx.answerCbQuery();
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
+        
+        ownerPendingAction = 'custom_days';
         
         const text = `
 <b>⚡ Custom Days</b>
@@ -2092,19 +2549,28 @@ ${createLoadingBar(100, '🟩')}
             const num = parseInt(text);
             if (isNaN(num) || num <= 0) return;
 
-            // Determine duration type based on number
+            // Determine duration type based on pending action
             let duration;
+            let action = ownerPendingAction;
+            ownerPendingAction = null;
             
-            if (num <= 60) {
-                // Minutes
+            if (action === 'custom_minutes') {
                 duration = Math.ceil(num / 60);
                 if (duration < 1) duration = 1;
-            } else if (num <= 168) {
-                // Hours
+            } else if (action === 'custom_hours') {
                 duration = num;
-            } else {
-                // Days
+            } else if (action === 'custom_days') {
                 duration = num * 24;
+            } else {
+                // Auto-detect
+                if (num <= 60) {
+                    duration = Math.ceil(num / 60);
+                    if (duration < 1) duration = 1;
+                } else if (num <= 168) {
+                    duration = num;
+                } else {
+                    duration = num * 24;
+                }
             }
             
             const config = await generateVPNConfig(userId, duration);
@@ -2240,7 +2706,7 @@ ${createLoadingBar(100, '🟩')}
             await sendWithImage(ctx, `
 <b>❌ Failed to generate QR Code</b>
 
-<i>Error:</i> <code>${error.message}</code>
+<i>Error:</i> <code>${escapeHtml(error.message)}</code>
             `);
         }
     });
@@ -2498,7 +2964,7 @@ ${ADMIN_SETTINGS.auto_enable_new_groups ? '✅ New groups can use the bot immedi
         
         let text = '📋 <b>Pending Approvals</b>\n\n';
         for (const chatId of CHAT_CONTROLS.pending_approvals) {
-            text += `• <code>${chatId}</code>\n`;
+            text += `• <code>${escapeHtml(chatId)}</code>\n`;
         }
         text += '\nUse <code>/enable {chat_id}</code> or <code>/disable {chat_id}</code>';
         
@@ -2592,7 +3058,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
             for (const uid of userKeys) {
                 const userData = users[uid];
                 const configCount = userData.configs ? userData.configs.filter(c => c.expiryTime > Date.now()).length : 0;
-                text += `• <code>${uid}</code> - ${configCount} configs\n`;
+                text += `• <code>${escapeHtml(uid)}</code> - ${configCount} configs\n`;
             }
             
             await editWithImage(ctx, text, getUserManagementKeyboard());
@@ -2600,7 +3066,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
             await editWithImage(ctx, `
 <b>❌ Error reading users</b>
 
-<i>${error.message}</i>
+<i>${escapeHtml(error.message)}</i>
             `, getUserManagementKeyboard());
         }
     });
@@ -2650,7 +3116,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
             await editWithImage(ctx, `
 <b>❌ Error reading stats</b>
 
-<i>${error.message}</i>
+<i>${escapeHtml(error.message)}</i>
             `, getUserManagementKeyboard());
         }
     });
@@ -2661,6 +3127,8 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'add_allowed_user';
+        
         await editWithImage(ctx, `
 ➕ <b>Add Allowed User</b>
 
@@ -2669,26 +3137,6 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
 
 <b>📌 You can also use:</b> <code>/allow {user_id}</code>
         `, [[{ text: '🔙 Back to Private Mode', callback_data: 'admin_private_mode' }]]);
-        
-        // Wait for user input - using a one-time handler
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            const userIdToAllow = input.trim();
-            if (!PRIVATE_MODE.allowed_users.includes(userIdToAllow)) {
-                PRIVATE_MODE.allowed_users.push(userIdToAllow);
-                await updateDbConfig();
-                await ctx.reply(`✅ User ${userIdToAllow} has been added to allowed list.`);
-            } else {
-                await ctx.reply(`ℹ️ User ${userIdToAllow} is already in allowed list.`);
-            }
-            
-            // Remove this handler after one use
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
 
     bot.action('admin_remove_allowed_user', async (ctx) => {
@@ -2726,7 +3174,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         await editWithImage(ctx, `
 ✅ <b>User Removed</b>
 
-<i>User <code>${uid}</code> has been removed from allowed list.</i>
+<i>User <code>${escapeHtml(uid)}</code> has been removed from allowed list.</i>
         `, getPrivateModeKeyboard());
     });
 
@@ -2736,6 +3184,8 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'add_blocked_user';
+        
         await editWithImage(ctx, `
 🚫 <b>Add Blocked User</b>
 
@@ -2744,24 +3194,6 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
 
 <b>📌 You can also use:</b> <code>/block {user_id}</code>
         `, [[{ text: '🔙 Back to Private Mode', callback_data: 'admin_private_mode' }]]);
-        
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            const userIdToBlock = input.trim();
-            if (!PRIVATE_MODE.blocked_users.includes(userIdToBlock)) {
-                PRIVATE_MODE.blocked_users.push(userIdToBlock);
-                await updateDbConfig();
-                await ctx.reply(`✅ User ${userIdToBlock} has been added to blocked list.`);
-            } else {
-                await ctx.reply(`ℹ️ User ${userIdToBlock} is already in blocked list.`);
-            }
-            
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
 
     bot.action('admin_remove_blocked_user', async (ctx) => {
@@ -2799,7 +3231,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         await editWithImage(ctx, `
 ✅ <b>User Unblocked</b>
 
-<i>User <code>${uid}</code> has been unblocked.</i>
+<i>User <code>${escapeHtml(uid)}</code> has been unblocked.</i>
         `, getPrivateModeKeyboard());
     });
 
@@ -2821,7 +3253,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         
         let text = '📋 <b>Allowed Users</b>\n\n';
         for (const uid of PRIVATE_MODE.allowed_users) {
-            text += `• <code>${uid}</code>\n`;
+            text += `• <code>${escapeHtml(uid)}</code>\n`;
         }
         
         await editWithImage(ctx, text, getPrivateModeKeyboard());
@@ -2844,7 +3276,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         
         let text = '📋 <b>Blocked Users</b>\n\n';
         for (const uid of PRIVATE_MODE.blocked_users) {
-            text += `• <code>${uid}</code>\n`;
+            text += `• <code>${escapeHtml(uid)}</code>\n`;
         }
         
         await editWithImage(ctx, text, getPrivateModeKeyboard());
@@ -2856,6 +3288,8 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'add_allowed_group';
+        
         await editWithImage(ctx, `
 ➕ <b>Add Allowed Group</b>
 
@@ -2864,25 +3298,6 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
 
 <b>📌 You can also use:</b> <code>/enable {group_id}</code>
         `, [[{ text: '🔙 Back to Group Settings', callback_data: 'admin_group_settings' }]]);
-        
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            const groupId = input.trim();
-            if (!GROUP_SETTINGS.allowed_groups.includes(groupId)) {
-                GROUP_SETTINGS.allowed_groups.push(groupId);
-                GROUP_SETTINGS.blocked_groups = GROUP_SETTINGS.blocked_groups.filter(id => id !== groupId);
-                await updateDbConfig();
-                await ctx.reply(`✅ Group ${groupId} has been added to allowed list.`);
-            } else {
-                await ctx.reply(`ℹ️ Group ${groupId} is already in allowed list.`);
-            }
-            
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
 
     bot.action('admin_remove_allowed_group', async (ctx) => {
@@ -2920,7 +3335,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         await editWithImage(ctx, `
 ✅ <b>Group Removed</b>
 
-<i>Group <code>${gid}</code> has been removed from allowed list.</i>
+<i>Group <code>${escapeHtml(gid)}</code> has been removed from allowed list.</i>
         `, getGroupSettingsKeyboard());
     });
 
@@ -2930,6 +3345,8 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'add_blocked_group';
+        
         await editWithImage(ctx, `
 🚫 <b>Add Blocked Group</b>
 
@@ -2938,25 +3355,6 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
 
 <b>📌 You can also use:</b> <code>/disable {group_id}</code>
         `, [[{ text: '🔙 Back to Group Settings', callback_data: 'admin_group_settings' }]]);
-        
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            const groupId = input.trim();
-            if (!GROUP_SETTINGS.blocked_groups.includes(groupId)) {
-                GROUP_SETTINGS.blocked_groups.push(groupId);
-                GROUP_SETTINGS.allowed_groups = GROUP_SETTINGS.allowed_groups.filter(id => id !== groupId);
-                await updateDbConfig();
-                await ctx.reply(`✅ Group ${groupId} has been added to blocked list.`);
-            } else {
-                await ctx.reply(`ℹ️ Group ${groupId} is already in blocked list.`);
-            }
-            
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
 
     bot.action('admin_remove_blocked_group', async (ctx) => {
@@ -2994,7 +3392,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         await editWithImage(ctx, `
 ✅ <b>Group Unblocked</b>
 
-<i>Group <code>${gid}</code> has been unblocked.</i>
+<i>Group <code>${escapeHtml(gid)}</code> has been unblocked.</i>
         `, getGroupSettingsKeyboard());
     });
 
@@ -3016,7 +3414,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         
         let text = '📋 <b>Allowed Groups</b>\n\n';
         for (const gid of GROUP_SETTINGS.allowed_groups) {
-            text += `• <code>${gid}</code>\n`;
+            text += `• <code>${escapeHtml(gid)}</code>\n`;
         }
         
         await editWithImage(ctx, text, getGroupSettingsKeyboard());
@@ -3039,7 +3437,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         
         let text = '📋 <b>Blocked Groups</b>\n\n';
         for (const gid of GROUP_SETTINGS.blocked_groups) {
-            text += `• <code>${gid}</code>\n`;
+            text += `• <code>${escapeHtml(gid)}</code>\n`;
         }
         
         await editWithImage(ctx, text, getGroupSettingsKeyboard());
@@ -3051,31 +3449,14 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'add_allowed_channel';
+        
         await editWithImage(ctx, `
 ➕ <b>Add Allowed Channel</b>
 
 <i>Send the channel ID to allow:</i>
 <code>Example: -100123456789</code>
         `, [[{ text: '🔙 Back to Channel Settings', callback_data: 'admin_channel_settings' }]]);
-        
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            const channelId = input.trim();
-            if (!CHANNEL_SETTINGS.allowed_channels.includes(channelId)) {
-                CHANNEL_SETTINGS.allowed_channels.push(channelId);
-                CHANNEL_SETTINGS.blocked_channels = CHANNEL_SETTINGS.blocked_channels.filter(id => id !== channelId);
-                await updateDbConfig();
-                await ctx.reply(`✅ Channel ${channelId} has been added to allowed list.`);
-            } else {
-                await ctx.reply(`ℹ️ Channel ${channelId} is already in allowed list.`);
-            }
-            
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
 
     bot.action('admin_remove_allowed_channel', async (ctx) => {
@@ -3113,7 +3494,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         await editWithImage(ctx, `
 ✅ <b>Channel Removed</b>
 
-<i>Channel <code>${cid}</code> has been removed from allowed list.</i>
+<i>Channel <code>${escapeHtml(cid)}</code> has been removed from allowed list.</i>
         `, getChannelSettingsKeyboard());
     });
 
@@ -3123,31 +3504,14 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'add_blocked_channel';
+        
         await editWithImage(ctx, `
 🚫 <b>Add Blocked Channel</b>
 
 <i>Send the channel ID to block:</i>
 <code>Example: -100123456789</code>
         `, [[{ text: '🔙 Back to Channel Settings', callback_data: 'admin_channel_settings' }]]);
-        
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            const channelId = input.trim();
-            if (!CHANNEL_SETTINGS.blocked_channels.includes(channelId)) {
-                CHANNEL_SETTINGS.blocked_channels.push(channelId);
-                CHANNEL_SETTINGS.allowed_channels = CHANNEL_SETTINGS.allowed_channels.filter(id => id !== channelId);
-                await updateDbConfig();
-                await ctx.reply(`✅ Channel ${channelId} has been added to blocked list.`);
-            } else {
-                await ctx.reply(`ℹ️ Channel ${channelId} is already in blocked list.`);
-            }
-            
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
 
     bot.action('admin_remove_blocked_channel', async (ctx) => {
@@ -3185,7 +3549,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         await editWithImage(ctx, `
 ✅ <b>Channel Unblocked</b>
 
-<i>Channel <code>${cid}</code> has been unblocked.</i>
+<i>Channel <code>${escapeHtml(cid)}</code> has been unblocked.</i>
         `, getChannelSettingsKeyboard());
     });
 
@@ -3207,7 +3571,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         
         let text = '📋 <b>Allowed Channels</b>\n\n';
         for (const cid of CHANNEL_SETTINGS.allowed_channels) {
-            text += `• <code>${cid}</code>\n`;
+            text += `• <code>${escapeHtml(cid)}</code>\n`;
         }
         
         await editWithImage(ctx, text, getChannelSettingsKeyboard());
@@ -3230,7 +3594,7 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         
         let text = '📋 <b>Blocked Channels</b>\n\n';
         for (const cid of CHANNEL_SETTINGS.blocked_channels) {
-            text += `• <code>${cid}</code>\n`;
+            text += `• <code>${escapeHtml(cid)}</code>\n`;
         }
         
         await editWithImage(ctx, text, getChannelSettingsKeyboard());
@@ -3242,59 +3606,20 @@ ${CHANNEL_SETTINGS.enabled ? '✅ Channels can use the bot.' : '❌ Channels can
         const userId = ctx.from.id;
         if (userId.toString() !== OWNER_ID) return;
         
+        ownerPendingAction = 'find_user';
+        
         await editWithImage(ctx, `
 🔍 <b>Find User</b>
 
 <i>Send the user ID to find:</i>
 <code>Example: 123456789</code>
         `, [[{ text: '🔙 Back to User Management', callback_data: 'admin_user_management' }]]);
-        
-        const textHandler = async (ctx) => {
-            if (ctx.from.id.toString() !== OWNER_ID) return;
-            const input = ctx.message.text;
-            if (input.startsWith('/')) return;
-            
-            try {
-                const uid = input.trim();
-                const userData = await getUserData(uid);
-                
-                if (!userData) {
-                    await ctx.replyWithHTML(`
-🔍 <b>User Not Found</b>
-
-<i>No user found with ID: <code>${uid}</code></i>
-                    `);
-                } else {
-                    const configCount = userData.configs ? userData.configs.filter(c => c.expiryTime > Date.now()).length : 0;
-                    const totalConfigs = userData.configs ? userData.configs.length : 0;
-                    
-                    await ctx.replyWithHTML(`
-🔍 <b>User Found</b>
-
-━━━━━━━━━━━━━━━━━━━━━━
-<b>User ID:</b> <code>${uid}</code>
-<b>Active Configs:</b> <code>${configCount}</code>
-<b>Total Configs:</b> <code>${totalConfigs}</code>
-━━━━━━━━━━━━━━━━━━━━━━
-
-<b>Configs:</b>
-${userData.configs ? userData.configs.map(c => 
-    `• ${c.duration}h (${c.expiryTime > Date.now() ? '🟢 Active' : '🔴 Expired'})`
-).join('\n') : 'No configs'}
-                    `);
-                }
-            } catch (error) {
-                await ctx.replyWithHTML(`
-<b>❌ Error finding user</b>
-
-<i>${error.message}</i>
-                `);
-            }
-            
-            bot.off('text', textHandler);
-        };
-        bot.on('text', textHandler);
     });
+
+    // ========== MAIN TEXT HANDLER FOR ADMIN ACTIONS ==========
+    // This is the main text handler that handles ownerPendingAction
+    // Also handles custom duration input
+    // The previous bot.on('text') is merged into this one
 
     // ========== ADMIN: XRAY COMMANDS ==========
     bot.action('admin_restart', async (ctx) => {
@@ -3346,7 +3671,7 @@ ${createLoadingBar(100, '🟩')}
 ${createLoadingBar(50, '🟩')}
         `);
         
-        await stopXray();
+        await stopXray(true);
         
         const text = `
 ✅ <b>Xray Stopped Successfully</b>
@@ -3463,6 +3788,182 @@ ${createLoadingBar(100, '🟩')}
         await editWithImage(ctx, text, getAdminKeyboard());
     });
 
+    // ========== MAIN TEXT HANDLER ==========
+    bot.on('text', async (ctx) => {
+        try {
+            const text = ctx.message.text;
+            const userId = ctx.from.id;
+            const user = ctx.from;
+            
+            // Only process if user is owner
+            if (userId.toString() !== OWNER_ID) return;
+            
+            // Check for pending admin action
+            if (ownerPendingAction) {
+                const input = text.trim();
+                
+                switch (ownerPendingAction) {
+                    case 'add_allowed_user':
+                        if (!PRIVATE_MODE.allowed_users.includes(input)) {
+                            PRIVATE_MODE.allowed_users.push(input);
+                            PRIVATE_MODE.blocked_users = PRIVATE_MODE.blocked_users.filter(id => id !== input);
+                            await updateDbConfig();
+                            await ctx.reply(`✅ User ${input} has been added to allowed list.`);
+                        } else {
+                            await ctx.reply(`ℹ️ User ${input} is already in allowed list.`);
+                        }
+                        break;
+                        
+                    case 'add_blocked_user':
+                        if (!PRIVATE_MODE.blocked_users.includes(input)) {
+                            PRIVATE_MODE.blocked_users.push(input);
+                            PRIVATE_MODE.allowed_users = PRIVATE_MODE.allowed_users.filter(id => id !== input);
+                            await updateDbConfig();
+                            await ctx.reply(`✅ User ${input} has been added to blocked list.`);
+                        } else {
+                            await ctx.reply(`ℹ️ User ${input} is already in blocked list.`);
+                        }
+                        break;
+                        
+                    case 'add_allowed_group':
+                        if (!GROUP_SETTINGS.allowed_groups.includes(input)) {
+                            GROUP_SETTINGS.allowed_groups.push(input);
+                            GROUP_SETTINGS.blocked_groups = GROUP_SETTINGS.blocked_groups.filter(id => id !== input);
+                            await updateDbConfig();
+                            await ctx.reply(`✅ Group ${input} has been added to allowed list.`);
+                        } else {
+                            await ctx.reply(`ℹ️ Group ${input} is already in allowed list.`);
+                        }
+                        break;
+                        
+                    case 'add_blocked_group':
+                        if (!GROUP_SETTINGS.blocked_groups.includes(input)) {
+                            GROUP_SETTINGS.blocked_groups.push(input);
+                            GROUP_SETTINGS.allowed_groups = GROUP_SETTINGS.allowed_groups.filter(id => id !== input);
+                            await updateDbConfig();
+                            await ctx.reply(`✅ Group ${input} has been added to blocked list.`);
+                        } else {
+                            await ctx.reply(`ℹ️ Group ${input} is already in blocked list.`);
+                        }
+                        break;
+                        
+                    case 'add_allowed_channel':
+                        if (!CHANNEL_SETTINGS.allowed_channels.includes(input)) {
+                            CHANNEL_SETTINGS.allowed_channels.push(input);
+                            CHANNEL_SETTINGS.blocked_channels = CHANNEL_SETTINGS.blocked_channels.filter(id => id !== input);
+                            await updateDbConfig();
+                            await ctx.reply(`✅ Channel ${input} has been added to allowed list.`);
+                        } else {
+                            await ctx.reply(`ℹ️ Channel ${input} is already in allowed list.`);
+                        }
+                        break;
+                        
+                    case 'add_blocked_channel':
+                        if (!CHANNEL_SETTINGS.blocked_channels.includes(input)) {
+                            CHANNEL_SETTINGS.blocked_channels.push(input);
+                            CHANNEL_SETTINGS.allowed_channels = CHANNEL_SETTINGS.allowed_channels.filter(id => id !== input);
+                            await updateDbConfig();
+                            await ctx.reply(`✅ Channel ${input} has been added to blocked list.`);
+                        } else {
+                            await ctx.reply(`ℹ️ Channel ${input} is already in blocked list.`);
+                        }
+                        break;
+                        
+                    case 'find_user':
+                        try {
+                            const uid = input.trim();
+                            const userData = await getUserData(uid);
+                            
+                            if (!userData) {
+                                await ctx.replyWithHTML(`
+🔍 <b>User Not Found</b>
+
+<i>No user found with ID: <code>${escapeHtml(uid)}</code></i>
+                                `);
+                            } else {
+                                const configCount = userData.configs ? userData.configs.filter(c => c.expiryTime > Date.now()).length : 0;
+                                const totalConfigs = userData.configs ? userData.configs.length : 0;
+                                
+                                await ctx.replyWithHTML(`
+🔍 <b>User Found</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>User ID:</b> <code>${escapeHtml(uid)}</code>
+<b>Active Configs:</b> <code>${configCount}</code>
+<b>Total Configs:</b> <code>${totalConfigs}</code>
+━━━━━━━━━━━━━━━━━━━━━━
+
+<b>Configs:</b>
+${userData.configs ? userData.configs.map(c => 
+    `• ${c.duration}h (${c.expiryTime > Date.now() ? '🟢 Active' : '🔴 Expired'})`
+).join('\n') : 'No configs'}
+                                `);
+                            }
+                        } catch (error) {
+                            await ctx.replyWithHTML(`
+<b>❌ Error finding user</b>
+
+<i>${escapeHtml(error.message)}</i>
+                            `);
+                        }
+                        break;
+                        
+                    case 'custom_minutes':
+                    case 'custom_hours':
+                    case 'custom_days':
+                        // Handle custom duration - already handled above
+                        // This is a fallback
+                        const num = parseInt(input);
+                        if (!isNaN(num) && num > 0) {
+                            let duration;
+                            if (ownerPendingAction === 'custom_minutes') {
+                                duration = Math.ceil(num / 60);
+                                if (duration < 1) duration = 1;
+                            } else if (ownerPendingAction === 'custom_hours') {
+                                duration = num;
+                            } else if (ownerPendingAction === 'custom_days') {
+                                duration = num * 24;
+                            }
+                            
+                            const config = await generateVPNConfig(userId, duration);
+                            await saveVPNConfig(userId, config);
+                            
+                            const messageData = formatVPNMessage(config, user);
+                            await sendWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
+                        }
+                        break;
+                }
+                
+                ownerPendingAction = null;
+                return;
+            }
+            
+            // If no pending action, check if it's a number for custom duration
+            const num = parseInt(text);
+            if (!isNaN(num) && num > 0) {
+                // Auto-detect duration type
+                let duration;
+                if (num <= 60) {
+                    duration = Math.ceil(num / 60);
+                    if (duration < 1) duration = 1;
+                } else if (num <= 168) {
+                    duration = num;
+                } else {
+                    duration = num * 24;
+                }
+                
+                const config = await generateVPNConfig(userId, duration);
+                await saveVPNConfig(userId, config);
+                
+                const messageData = formatVPNMessage(config, user);
+                await sendWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
+            }
+            
+        } catch (error) {
+            console.error('Text handler error:', error);
+        }
+    });
+
     // ========== ERROR HANDLING ==========
     bot.catch((err, ctx) => {
         console.error('Bot Error:', err);
@@ -3477,25 +3978,55 @@ ${createLoadingBar(100, '🟩')}
     });
 }
 
-// ==================== SCHEDULERS ====================
+// ==================== CLEANUP SCHEDULER - Optimized ====================
 function startCleanupScheduler() {
-    setInterval(async () => {
-        await cleanupExpiredConfigs();
-    }, 60 * 60 * 1000);
+    // Run every 2 hours instead of 1 hour (saves CPU)
+    let cleanupCount = 0;
     
+    setInterval(async () => {
+        cleanupCount++;
+        
+        // Only run cleanup every 2 hours
+        if (cleanupCount % 2 === 0) {
+            await cleanupExpiredConfigs();
+        }
+        
+        if (cleanupCount > 10) cleanupCount = 0;
+    }, 60 * 60 * 1000); // Check every hour, cleanup every 2 hours
+    
+    // Run once on startup (delayed)
     setTimeout(async () => {
         await cleanupExpiredConfigs();
-    }, 5000);
+    }, 10000); // Delay 10 seconds to let system stabilize
 }
 
+// ==================== XRAY MONITOR - Optimized ====================
 function startXrayMonitor() {
+    // Check every 60 seconds (saves CPU)
+    let checkCount = 0;
+    
     setInterval(async () => {
-        const status = await getXrayStatus();
-        if (!status.running && xrayRestartCount < 10) {
-            console.log('Xray down, restarting...');
-            await startXray();
+        checkCount++;
+        
+        // Only do full check every 2 minutes, quick check in between
+        if (checkCount % 2 === 0) {
+            if (intentionalXrayStop) return;
+            
+            // Quick check: just see if process exists
+            if (!xrayProcess || xrayProcess.killed) {
+                isXrayRunning = false;
+            }
+            
+            if (!isXrayRunning && xrayRestartCount < 10 && !intentionalXrayStop) {
+                console.log('⚠️ Xray not running, restarting...');
+                await startXray();
+            }
         }
-    }, 30000);
+        
+        // Reset counter to avoid overflow
+        if (checkCount > 100) checkCount = 0;
+        
+    }, 60000); // Check every 60 seconds
 }
 
 // ==================== DIRECTORY SETUP ====================
@@ -3508,20 +4039,41 @@ async function ensureDirectories() {
         try {
             await fsPromises.access(DATA_FILE);
         } catch {
-            await fsPromises.writeFile(DATA_FILE, JSON.stringify({}, null, 2));
+            await writeJsonAtomic(DATA_FILE, {});
         }
     } catch (error) {
         console.error('Error creating directories:', error);
     }
 }
 
-// ==================== START BOT ====================
+// ==================== MEMORY MONITOR ====================
+function startMemoryMonitor() {
+    setInterval(() => {
+        const mem = process.memoryUsage();
+        const memMB = mem.heapUsed / 1024 / 1024;
+        
+        if (memMB > MAX_RAM_MB) {
+            console.log(`⚠️ Memory high: ${memMB.toFixed(1)}MB / ${MAX_RAM_MB}MB`);
+            
+            // Force garbage collection if memory is too high
+            if (global.gc) {
+                console.log('🔄 Running garbage collection...');
+                global.gc();
+            }
+            
+            // Log warning
+            console.log(`💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB / ${Math.round(mem.heapTotal / 1024 / 1024)}MB`);
+        }
+    }, 30000); // Check every 30 seconds
+}
+
+// ==================== START BOT - Updated ====================
 async function startBot() {
     try {
         let configLoaded = await loadConfig();
         
         if (!configLoaded) {
-            // Try to create default config
+            // Create default config...
             const defaultConfig = {
                 "bot_token": "YOUR_BOT_TOKEN_HERE",
                 "owner_id": "YOUR_TELEGRAM_USER_ID",
@@ -3529,6 +4081,7 @@ async function startBot() {
                 "port": 10808,
                 "path": "/kudda-vpn",
                 "image_url": "",
+                "vless_host": "m.zoom.us",
                 "private_mode": { "enabled": false, "allowed_users": [], "blocked_users": [] },
                 "group_settings": { "enabled": true, "allowed_groups": [], "blocked_groups": [] },
                 "channel_settings": { "enabled": true, "allowed_channels": [], "blocked_channels": [] },
@@ -3543,9 +4096,9 @@ async function startBot() {
                 "chat_controls": { "enabled_chats": [], "disabled_chats": [], "pending_approvals": [] }
             };
             
-            await fsPromises.writeFile(
+            await writeJsonAtomic(
                 path.join(__dirname, 'db.json'),
-                JSON.stringify(defaultConfig, null, 2)
+                defaultConfig
             );
             console.log('📝 Created default db.json. Please edit it with your values!');
             console.log('❌ Please edit db.json with your settings, then restart.');
@@ -3568,27 +4121,33 @@ async function startBot() {
         
         startCleanupScheduler();
         startXrayMonitor();
+        startMemoryMonitor(); // Add memory monitor
         
         console.log('📊 Memory: ' + Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB');
         
         // Memory usage log every 5 minutes
         setInterval(() => {
             const mem = process.memoryUsage();
+            const memMB = mem.heapUsed / 1024 / 1024;
             console.log(`💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB / ${Math.round(mem.heapTotal / 1024 / 1024)}MB`);
+            
+            if (memMB > MAX_RAM_MB) {
+                console.log(`⚠️ Memory warning: ${memMB.toFixed(1)}MB > ${MAX_RAM_MB}MB`);
+            }
         }, 5 * 60 * 1000);
         
-        await notifyOwner('✅ Bot started successfully!\nXray auto-started.');
+        await notifyOwner('✅ Bot started successfully!\nXray auto-started.\n\n🔄 Immediate restart enabled for new configs\n🧹 Auto-cleanup enabled (2 hours)\n💾 Memory limit: 100MB');
         
         process.once('SIGINT', async () => {
             console.log('Shutting down...');
-            await stopXray();
+            await stopXray(true);
             bot.stop('SIGINT');
             process.exit(0);
         });
         
         process.once('SIGTERM', async () => {
             console.log('Shutting down...');
-            await stopXray();
+            await stopXray(true);
             bot.stop('SIGTERM');
             process.exit(0);
         });
