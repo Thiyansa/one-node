@@ -46,6 +46,13 @@
       },
       {
         "type": "field",
+        "user": [
+          "KUDDA"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
         "domain": [
           "geosite:category-ads-all",
           "geosite:category-porn"
