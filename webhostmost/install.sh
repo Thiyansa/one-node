@@ -23,7 +23,7 @@ UUID="$uuid_part1-$uuid_part2-$uuid_part3-$uuid_part4-$uuid_part5"
 
 # Install website
 cp /usr/sbin/cloudlinux-selector $HOME/cx
-$HOME/cx create --json --interpreter=nodejs --user=`whoami` --app-root=$HOME/domains/$DOMAIN/public_html --app-uri=/ --version=22 --app-mode=Production --startup-file=app.js --env-vars='{"UUID":"'$UUID'","DOMAIN":"'$DOMAIN'","REMARKS":"'$REMARKS'","WEB_SHELL":"off","WEB_PATH":"'$WEB_PATH'"}'
+$HOME/cx create --json --interpreter=nodejs --user=`whoami` --app-root=$HOME/domains/$DOMAIN/public_html --app-uri=/ --version=22 --app-mode=Production --startup-file=app.js --env-vars='{"UUID":"'$UUID'","DOMAIN":"'$DOMAIN'","REMARKS":"'$REMARKS'","WEB_SHELL":"off"}'
 $HOME/nodevenv/domains/$DOMAIN/public_html/22/bin/npm install
 rm -rf $HOME/.npm/_logs/*.log
 
