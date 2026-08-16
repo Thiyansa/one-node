@@ -158,14 +158,6 @@
       {
         "type": "field",
         "domain": [
-          "domain:psiphon.ca"
-        ],
-        "outboundTag": "blocked",
-        "type": "field"
-      },
-      {
-        "type": "field",
-        "domain": [
           "domain:imgur.com",
           "domain:9gag.com",
           "domain:flickr.com",
