@@ -11,6 +11,10 @@ Or You can use this installing methods
 curl -fsSL https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/webhostmost/install.sh | \
 env DOMAIN=example.com REMARKS=KUDDA bash
 ```
+### Uninstall
+```bash
+curl -s https://raw.githubusercontent.com/Thiyansa/one-node/refs/heads/main/webhostmost/uninstall.sh | env DOMAIN=example.com bash
+```
 
 ### Available Parameters
 
