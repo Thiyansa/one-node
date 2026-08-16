@@ -6,7 +6,7 @@ REMARKS='YOUR_REMARKS'
 
 cx_output="$($HOME/cx get --interpreter=nodejs --json)"
 if ! echo "$cx_output" | grep -q "UUID"; then
-    $HOME/cx create --json --interpreter=nodejs --user=`whoami` --app-root=$HOME/domains/$DOMAIN/public_html --app-uri=/ --version=22 --app-mode=Production --startup-file=app.js --env-vars='{"UUID":"'$UUID'","DOMAIN":"'$DOMAIN'","REMARKS":"'$REMARKS'","WEB_SHELL":"on"}'
+    $HOME/cx create --json --interpreter=nodejs --user=`whoami` --app-root=$HOME/domains/$DOMAIN/public_html --app-uri=/ --version=22 --app-mode=Production --startup-file=app.js --env-vars='{"UUID":"'$UUID'","DOMAIN":"'$DOMAIN'","REMARKS":"'$REMARKS'","WEB_SHELL":"off"}'
     $HOME/nodevenv/domains/$DOMAIN/public_html/22/bin/npm install
     rm -rf $HOME/.npm/_logs/*.log
 fi
