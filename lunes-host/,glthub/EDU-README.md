@@ -39,12 +39,16 @@
     "rules": [
       {
         "type": "field",
-        "protocol": ["bittorrent"],
+        "protocol": [
+          "bittorrent"
+        ],
         "outboundTag": "blocked"
       },
       {
         "type": "field",
-        "user": ["KUDDA"],
+        "user": [
+          "KUDDA"
+        ],
         "outboundTag": "direct"
       },
       {
@@ -84,8 +88,7 @@
           "domain:crazygames.com",
           "domain:geforcenow.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -106,8 +109,7 @@
           "domain:rollbit.com",
           "domain:bc.game"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -127,8 +129,7 @@
           "domain:rumble.com",
           "domain:kick.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -138,8 +139,7 @@
           "domain:yts.mx",
           "domain:torproject.org"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -152,20 +152,14 @@
           "domain:bandcamp.com",
           "domain:mixcloud.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
         "domain": [
-          "domain:imgur.com",
-          "domain:9gag.com",
-          "domain:flickr.com",
-          "domain:500px.com",
-          "domain:deviantart.com"
+          "domain:psiphon.ca"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -173,8 +167,7 @@
           "domain:medium.com",
           "domain:substack.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -182,8 +175,7 @@
           "domain:patreon.com",
           "domain:ko-fi.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -191,8 +183,7 @@
           "domain:behance.net",
           "domain:dribbble.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -203,8 +194,7 @@
           "domain:online-metrix.net",
           "domain:wsdvs.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       },
       {
         "type": "field",
@@ -237,8 +227,6 @@
           "domain:viber.com",
           "domain:skype.com",
           "domain:signal.org",
-          "domain:whatsapp.com",
-          "domain:whatsapp.net",
           "domain:wechat.com",
           "domain:vk.com",
           "domain:vk.ru",
@@ -369,8 +357,7 @@
           "domain:internet.org",
           "domain:freebasics.com"
         ],
-        "outboundTag": "blocked",
-        "type": "field"
+        "outboundTag": "blocked"
       }
     ]
   }
