@@ -327,6 +327,10 @@ async function checkPermissions(ctx) {
 <blockquote><i>මෙම සේවාව දැනට Private Mode තුළ ක්‍රියාත්මක වේ.
 ඔබට මෙය භාවිතා කිරීමට අවසර ලබා දී නොමැත.</i></blockquote>
 
+<b>🎓 KUDDA EDUCATION VPN</b>
+<blockquote><i>මෙය පාසල් සිසුන් සහ අධ්‍යාපනය හදාරන සියලු දෙනා සඳහා නිර්මාණය කරන ලද නොමිලේ VPN සේවාවකි.</i></blockquote>
+<a href="https://t.me/FreeEduVPN">FREE EDU VPN GROUP</a>
+
 <b>📌 අවසර ලබා ගැනීමට සම්බන්ධ වන්න:</b>
 <a href="https://t.me/mataberiyo">Contact Admin</a>
                 `, { parse_mode: 'HTML' });
@@ -337,11 +341,13 @@ async function checkPermissions(ctx) {
         return true;
     }
     
-    // ----- CHECK GROUP -----
+
+// ----- CHECK GROUP -----
     if (chatType === 'group' || chatType === 'supergroup') {
         // Check group settings
         if (!GROUP_SETTINGS.enabled) {
-            await ctx.reply(`
+            try {
+                await ctx.reply(`
 <b>🚫 Groups Disabled</b>
 
 <blockquote><i>කණ්ඩායම් ප්‍රවේශය දැනට පරිපාලක විසින් සීමා කර ඇත.
@@ -349,13 +355,15 @@ async function checkPermissions(ctx) {
 
 <b>📩 සහාය සඳහා:</b>
 <a href="https://t.me/mataberiyo">Contact Admin</a>
-            `, { parse_mode: 'HTML' });
+                `, { parse_mode: 'HTML' });
+            } catch (e) { console.log(`[Bot Kicked/Blocked] Cannot send to ${chatId}`); }
             return false;
         }
         
         // Check if group is blocked
         if (GROUP_SETTINGS.blocked_groups.includes(chatId.toString())) {
-            await ctx.reply(`
+            try {
+                await ctx.reply(`
 <b>🚫 Group Blocked</b>
 
 <blockquote><i>මෙම කණ්ඩායමට ප්‍රවේශය පරිපාලක විසින් අවහිර කර ඇත.
@@ -363,14 +371,16 @@ async function checkPermissions(ctx) {
 
 <b>📩 Contact:</b>
 <a href="https://t.me/mataberiyo">Admin</a>
-            `, { parse_mode: 'HTML' });
+                `, { parse_mode: 'HTML' });
+            } catch (e) { console.log(`[Bot Kicked/Blocked] Cannot send to ${chatId}`); }
             return false;
         }
         
         // Check if group is in allowed list (if list is not empty)
         if (GROUP_SETTINGS.allowed_groups.length > 0 && 
             !GROUP_SETTINGS.allowed_groups.includes(chatId.toString())) {
-            await ctx.reply(`
+            try {
+                await ctx.reply(`
 <b>🚫 Group Access Denied</b>
 
 <blockquote><i>මෙම කණ්ඩායමට භාවිතා කිරීමේ අවසර ලබා දී නොමැත.
@@ -378,13 +388,15 @@ async function checkPermissions(ctx) {
 
 <b>📩 Contact:</b>
 <a href="https://t.me/mataberiyo">Admin</a>
-            `, { parse_mode: 'HTML' });
+                `, { parse_mode: 'HTML' });
+            } catch (e) { console.log(`[Bot Kicked/Blocked] Cannot send to ${chatId}`); }
             return false;
         }
         
         // Check chat control (enabled/disabled)
         if (!isChatEnabled(chatId)) {
-            await ctx.reply(`
+            try {
+                await ctx.reply(`
 <b>🚫 Chat Access Disabled</b>
 
 <blockquote><i>මෙම සංවාදය පරිපාලක විසින් අක්‍රිය කර ඇත.
@@ -392,13 +404,15 @@ async function checkPermissions(ctx) {
 
 <b>📩 Contact:</b>
 <a href="https://t.me/mataberiyo">Admin</a>
-            `, { parse_mode: 'HTML' });
+                `, { parse_mode: 'HTML' });
+            } catch (e) { console.log(`[Bot Kicked/Blocked] Cannot send to ${chatId}`); }
             return false;
         }
         
         // Check pending approvals
         if (CHAT_CONTROLS.pending_approvals.includes(chatId.toString())) {
-            await ctx.reply(`
+            try {
+                await ctx.reply(`
 <b>⏳ Approval Pending</b>
 
 <blockquote><i>මෙම චැට් එක භාවිතා කිරීමට පෙර පරිපාලක අනුමැතිය අවශ්‍ය වේ.
@@ -406,7 +420,8 @@ async function checkPermissions(ctx) {
 
 <b>📩 Contact:</b>
 <a href="https://t.me/mataberiyo">Admin</a>
-            `, { parse_mode: 'HTML' });
+                `, { parse_mode: 'HTML' });
+            } catch (e) { console.log(`[Bot Kicked/Blocked] Cannot send to ${chatId}`); }
             return false;
         }
         
@@ -499,7 +514,8 @@ async function checkAndEnableChat(ctx) {
     
     // Check if chat is disabled
     if (CHAT_CONTROLS.disabled_chats.includes(chatId.toString())) {
-        await ctx.reply(`
+        try {
+            await ctx.reply(`
 <b>🚫 චැට් ප්‍රවේශය අවහිර කර ඇත</b>
 
 <blockquote><i>මෙම සංවාදය පරිපාලක විසින් තාවකාලිකව අක්‍රිය කර ඇත.
@@ -507,7 +523,8 @@ async function checkAndEnableChat(ctx) {
 
 <b>📩 සහාය සඳහා:</b>
 <a href="https://t.me/mataberiyo">Contact Admin</a>
-        `, { parse_mode: 'HTML' });
+            `, { parse_mode: 'HTML' });
+        } catch (e) {}
         return false;
     }
     
@@ -642,14 +659,32 @@ async function getCachedImage() {
     }
 }
 
-// ==================== SAFE EDIT TEXT (FIXES THE ERROR) ====================
-// This function safely edits a message regardless of whether it's text or photo
+// ==================== SAFE EDIT TEXT ====================
 async function editTextSafe(ctx, text, keyboard = null, parse_mode = 'HTML') {
     const replyMarkup = keyboard ? { inline_keyboard: keyboard } : undefined;
     
     try {
-        const messageId = ctx.message?.message_id || ctx.update?.callback_query?.message?.message_id;
-        const isPhoto = ctx.update?.callback_query?.message?.photo || ctx.message?.photo;
+        let messageId = null;
+        let isPhoto = false;
+        
+        // Try to get from callback_query first
+        if (ctx.update?.callback_query) {
+            const cb = ctx.update.callback_query;
+            messageId = cb.message?.message_id;
+            isPhoto = !!cb.message?.photo;
+        }
+        
+        // If not found, try from message
+        if (!messageId && ctx.message) {
+            messageId = ctx.message.message_id;
+            isPhoto = !!ctx.message.photo;
+        }
+        
+        // If still not found
+        if (!messageId) {
+            messageId = ctx.message?.message_id || ctx.update?.callback_query?.message?.message_id;
+            isPhoto = ctx.update?.callback_query?.message?.photo || ctx.message?.photo;
+        }
         
         if (!messageId) {
             await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
@@ -665,7 +700,7 @@ async function editTextSafe(ctx, text, keyboard = null, parse_mode = 'HTML') {
                 });
                 return true;
             } catch (captionError) {
-                console.log('Caption edit failed, trying text edit:', captionError.message);
+                // If caption edit fails, try text edit
                 try {
                     await ctx.editMessageText(text, {
                         parse_mode: parse_mode,
@@ -673,7 +708,7 @@ async function editTextSafe(ctx, text, keyboard = null, parse_mode = 'HTML') {
                     });
                     return true;
                 } catch (textError) {
-                    console.log('Text edit also failed:', textError.message);
+                    // If both fail, send new message
                     await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
                     return false;
                 }
@@ -687,33 +722,117 @@ async function editTextSafe(ctx, text, keyboard = null, parse_mode = 'HTML') {
                 });
                 return true;
             } catch (error) {
-                console.log('Edit text failed, sending new message:', error.message);
+                // If edit fails, send new message
                 await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
                 return false;
             }
         }
     } catch (error) {
         console.error('editTextSafe error:', error);
-        await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+        try {
+            await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+        } catch (fallbackError) {
+            console.error('Fallback failed:', fallbackError);
+        }
         return false;
     }
 }
 
-// ==================== IN-PLACE EDIT WITH IMAGE ====================
-// TRUE IN-PLACE EDITING - NO DELETE, NO NEW MESSAGE
-// Uses editMessageCaption() for photos and editMessageText() for text messages
+// ==================== FIX: CHECK CAPTION LENGTH ====================
+function isCaptionTooLong(text) {
+    // Telegram caption limit is 1024 characters for photos
+    return text.length > 1024;
+}
+
+// ==================== FIX: SEND LONG MESSAGE AS TEXT ====================
+async function sendLongMessage(ctx, text, keyboard = null, parse_mode = 'HTML') {
+    const replyMarkup = keyboard ? { inline_keyboard: keyboard } : undefined;
+    
+    // If text is short enough, send with image
+    if (!isCaptionTooLong(text) || !await getCachedImage()) {
+        const imagePath = await getCachedImage();
+        if (imagePath) {
+            try {
+                await ctx.replyWithPhoto(
+                    { source: imagePath },
+                    {
+                        caption: text,
+                        parse_mode: parse_mode,
+                        reply_markup: replyMarkup
+                    }
+                );
+                return true;
+            } catch (error) {
+                console.error('Error sending with image:', error);
+            }
+        }
+    }
+    
+    // If caption is too long OR image failed, send as text message
+    try {
+        await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+        return true;
+    } catch (error) {
+        console.error('Error sending text message:', error);
+        return false;
+    }
+}
+
+// ==================== FIX: editWithImage WITH LENGTH CHECK ====================
 async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
     const imagePath = await getCachedImage();
     const replyMarkup = keyboard ? { inline_keyboard: keyboard } : undefined;
     
+    // ✅ FIX: Check if caption is too long
+    const captionTooLong = isCaptionTooLong(text);
+    
     try {
-        // Try to get the current message type
-        const chatId = ctx.chat.id;
-        const messageId = ctx.message?.message_id || ctx.update?.callback_query?.message?.message_id;
-        const isPhoto = ctx.update?.callback_query?.message?.photo || ctx.message?.photo;
+        // Get chatId and messageId safely
+        let chatId = null;
+        let messageId = null;
+        let isPhoto = false;
+        
+        if (ctx.update?.callback_query) {
+            const cb = ctx.update.callback_query;
+            messageId = cb.message?.message_id;
+            chatId = cb.message?.chat?.id;
+            isPhoto = !!cb.message?.photo;
+        }
+        
+        if (!messageId && ctx.message) {
+            messageId = ctx.message.message_id;
+            chatId = ctx.message.chat?.id;
+            isPhoto = !!ctx.message.photo;
+        }
         
         if (!messageId) {
-            // No message to edit, send new one
+            messageId = ctx.message?.message_id || ctx.update?.callback_query?.message?.message_id;
+            chatId = ctx.chat?.id || ctx.from?.id;
+            isPhoto = ctx.update?.callback_query?.message?.photo || ctx.message?.photo;
+        }
+        
+        // If caption is too long, send as text instead
+        if (captionTooLong) {
+            if (messageId && chatId) {
+                try {
+                    await ctx.editMessageText(text, {
+                        parse_mode: parse_mode,
+                        reply_markup: replyMarkup
+                    });
+                    return true;
+                } catch (editError) {
+                    // If can't edit, send new text message
+                    await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+                    return true;
+                }
+            } else {
+                await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+                return true;
+            }
+        }
+        
+        // Caption is short enough, try with image
+        if (!messageId || !chatId) {
             if (imagePath) {
                 await ctx.replyWithPhoto(
                     { source: imagePath },
@@ -729,7 +848,6 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
             return true;
         }
         
-        // If original message is a photo, use editMessageCaption
         if (isPhoto) {
             try {
                 await ctx.editMessageCaption(text, {
@@ -738,8 +856,6 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
                 });
                 return true;
             } catch (captionError) {
-                console.log('Caption edit failed:', captionError.message);
-                // Fallback: try text edit
                 try {
                     await ctx.editMessageText(text, {
                         parse_mode: parse_mode,
@@ -747,8 +863,6 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
                     });
                     return true;
                 } catch (textError) {
-                    console.log('Text edit also failed:', textError.message);
-                    // Send new message
                     if (imagePath) {
                         await ctx.replyWithPhoto(
                             { source: imagePath },
@@ -765,17 +879,14 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
                 }
             }
         } else {
-            // Text message - use editMessageText
             if (imagePath) {
                 try {
-                    // Try caption edit first (in case it's a photo)
                     await ctx.editMessageCaption(text, {
                         parse_mode: parse_mode,
                         reply_markup: replyMarkup
                     });
                     return true;
                 } catch (captionError) {
-                    // Fallback to text edit
                     try {
                         await ctx.editMessageText(text, {
                             parse_mode: parse_mode,
@@ -783,7 +894,6 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
                         });
                         return true;
                     } catch (textError) {
-                        console.log('Edit text failed, sending new message:', textError.message);
                         await ctx.replyWithPhoto(
                             { source: imagePath },
                             {
@@ -803,7 +913,6 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
                     });
                     return true;
                 } catch (error) {
-                    console.log('Edit text failed, sending new message:', error.message);
                     await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
                     return false;
                 }
@@ -811,75 +920,91 @@ async function editWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
         }
     } catch (error) {
         console.error('EditWithImage error:', error);
-        // Fallback: send new message
-        if (imagePath) {
-            await ctx.replyWithPhoto(
-                { source: imagePath },
-                {
-                    caption: text,
-                    parse_mode: parse_mode,
-                    reply_markup: replyMarkup
-                }
-            );
-        } else {
+        try {
             await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+        } catch (fallbackError) {
+            console.error('Fallback also failed:', fallbackError);
         }
         return false;
     }
 }
 
-// ==================== SEND WITH IMAGE ====================
+// ==================== FIX: sendWithImage WITH LENGTH CHECK ====================
 async function sendWithImage(ctx, text, keyboard = null, parse_mode = 'HTML') {
     const imagePath = await getCachedImage();
     const replyMarkup = keyboard ? { inline_keyboard: keyboard } : undefined;
     
-    if (imagePath) {
+    // ✅ FIX: Check if caption is too long
+    const captionTooLong = isCaptionTooLong(text);
+    
+    // If caption is too long, send as text message without image
+    if (captionTooLong || !imagePath) {
         try {
-            await ctx.replyWithPhoto(
-                { source: imagePath },
-                {
-                    caption: text,
-                    parse_mode: parse_mode,
-                    reply_markup: replyMarkup
-                }
-            );
+            await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
             return true;
         } catch (error) {
-            console.error('Error sending with image:', error);
-            await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+            console.error('Error sending text:', error);
             return false;
         }
-    } else {
-        await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
-        return false;
+    }
+    
+    // Caption is short enough, send with image
+    try {
+        await ctx.replyWithPhoto(
+            { source: imagePath },
+            {
+                caption: text,
+                parse_mode: parse_mode,
+                reply_markup: replyMarkup
+            }
+        );
+        return true;
+    } catch (error) {
+        console.error('Error sending with image:', error);
+        try {
+            await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+            return true;
+        } catch (textError) {
+            console.error('Fallback text error:', textError);
+            return false;
+        }
     }
 }
 
-// ==================== SEND WITH IMAGE AND DELETE OLD ====================
+// ==================== FIX: sendWithImageAndDelete WITH LENGTH CHECK ====================
 async function sendWithImageAndDelete(ctx, text, keyboard = null, parse_mode = 'HTML') {
     const imagePath = await getCachedImage();
     const replyMarkup = keyboard ? { inline_keyboard: keyboard } : undefined;
-    let sentMessage = null;
     
-    if (imagePath) {
+    // ✅ FIX: Check if caption is too long
+    const captionTooLong = isCaptionTooLong(text);
+    
+    if (captionTooLong || !imagePath) {
         try {
-            sentMessage = await ctx.replyWithPhoto(
-                { source: imagePath },
-                {
-                    caption: text,
-                    parse_mode: parse_mode,
-                    reply_markup: replyMarkup
-                }
-            );
-            return sentMessage;
+            return await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
         } catch (error) {
-            console.error('Error sending with image:', error);
-            sentMessage = await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
-            return sentMessage;
+            console.error('Error sending text:', error);
+            return null;
         }
-    } else {
-        sentMessage = await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
-        return sentMessage;
+    }
+    
+    try {
+        return await ctx.replyWithPhoto(
+            { source: imagePath },
+            {
+                caption: text,
+                parse_mode: parse_mode,
+                reply_markup: replyMarkup
+            }
+        );
+    } catch (error) {
+        console.error('Error sending with image:', error);
+        try {
+            return await ctx.replyWithHTML(text, { reply_markup: replyMarkup });
+        } catch (textError) {
+            console.error('Fallback text error:', textError);
+            return null;
+        }
     }
 }
 
@@ -1364,7 +1489,52 @@ ${progressBar}</code>
     return { text, parse_mode: 'HTML', reply_markup: { inline_keyboard: buttons } };
 }
 
-function formatConfigList(configs, userId) {
+// function formatConfigList(configs, userId) {
+//     if (configs.length === 0) {
+//         return {
+//             text: `
+// <b>📋 සක්‍රීය VPN Configurations නොමැත</b>
+
+// <i>ඔබට දැනට කිසිදු සක්‍රීය VPN Configuration එකක් නොමැත.</i>
+
+// <b>💡 උපදෙස:</b> ආරම්භ කිරීමට <b>🔰 Create Your Own VPN</b> Button එක භාවිතා කරන්න.`,
+//             parse_mode: 'HTML'
+//         };
+//     }
+
+//     let message = `
+// <b>📋 Your Active Configurations</b>
+
+// <i>Here are your current VPN connections:</i>\n\n`;
+    
+//     for (const config of configs) {
+//         const remaining = Math.ceil((config.expiryTime - Date.now()) / (1000 * 60 * 60));
+//         const bar = createProgressBar(remaining, config.duration);
+//         const expiryDate = new Date(config.expiryTime);
+
+//         message += `
+// <blockquote><b>🔹 ${config.duration}h VPN</b>
+// ${bar}
+// <b>ID:</b> <code>${escapeHtml(config.id)}</code>
+// <b>Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
+// <b>⌛ ${remaining}h remaining</b></blockquote>\n`;
+//     }
+    
+//     return { text: message, parse_mode: 'HTML' };
+// }
+
+// ==================== CONFIG PAGINATION ====================
+let configPagination = {};
+
+function getConfigPage(userId, page = 0) {
+    if (!configPagination[userId]) {
+        configPagination[userId] = { page: 0 };
+    }
+    configPagination[userId].page = page;
+    return configPagination[userId].page;
+}
+
+function formatConfigList(configs, userId, page = 0) {
     if (configs.length === 0) {
         return {
             text: `
@@ -1373,16 +1543,40 @@ function formatConfigList(configs, userId) {
 <i>ඔබට දැනට කිසිදු සක්‍රීය VPN Configuration එකක් නොමැත.</i>
 
 <b>💡 උපදෙස:</b> ආරම්භ කිරීමට <b>🔰 Create Your Own VPN</b> Button එක භාවිතා කරන්න.`,
-            parse_mode: 'HTML'
+            parse_mode: 'HTML',
+            keyboard: [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]]
         };
     }
+
+    // Pagination settings
+    const itemsPerPage = 3; // Each page shows 3 configs
+    const totalPages = Math.ceil(configs.length / itemsPerPage);
+    
+    // Ensure page is within bounds
+    if (page < 0) page = 0;
+    if (page >= totalPages) page = totalPages - 1;
+    
+    // Get current page configs
+    const start = page * itemsPerPage;
+    const end = Math.min(start + itemsPerPage, configs.length);
+    const pageConfigs = configs.slice(start, end);
+    
+    // Save current page for user
+    if (!configPagination[userId]) {
+        configPagination[userId] = {};
+    }
+    configPagination[userId].page = page;
+    configPagination[userId].totalPages = totalPages;
+    configPagination[userId].configs = configs;
 
     let message = `
 <b>📋 Your Active Configurations</b>
 
-<i>Here are your current VPN connections:</i>\n\n`;
+<i>Page ${page + 1} of ${totalPages} (${configs.length} total)</i>
+
+━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     
-    for (const config of configs) {
+    for (const config of pageConfigs) {
         const remaining = Math.ceil((config.expiryTime - Date.now()) / (1000 * 60 * 60));
         const bar = createProgressBar(remaining, config.duration);
         const expiryDate = new Date(config.expiryTime);
@@ -1395,7 +1589,52 @@ ${bar}
 <b>⌛ ${remaining}h remaining</b></blockquote>\n`;
     }
     
-    return { text: message, parse_mode: 'HTML' };
+    // Build navigation buttons
+    const navButtons = [];
+    
+    // Back button
+    if (page > 0) {
+        navButtons.push({ text: '⬅️ Back', callback_data: `config_page_${page - 1}` });
+    }
+    
+    // Page indicator
+    navButtons.push({ text: `${page + 1}/${totalPages}`, callback_data: 'noop' });
+    
+    // Next button
+    if (page < totalPages - 1) {
+        navButtons.push({ text: 'Next ➡️', callback_data: `config_page_${page + 1}` });
+    }
+    
+    // Build keyboard
+    const keyboard = [];
+    
+    // View buttons - 3 per row
+    const viewButtons = pageConfigs.map(c => ({
+        text: `👁️ ${c.duration}h`,
+        callback_data: `view_config_${c.id}`
+    }));
+
+    for (let i = 0; i < viewButtons.length; i += 3) {
+        const row = [];
+        for (let j = i; j < Math.min(i + 3, viewButtons.length); j++) {
+            row.push(viewButtons[j]);
+        }
+        keyboard.push(row);
+    }
+    
+    // Add navigation row if there are multiple pages
+    if (navButtons.length > 1) {
+        keyboard.push(navButtons);
+    }
+    
+    // Add main menu button
+    keyboard.push([{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]);
+    
+    return { 
+        text: message, 
+        parse_mode: 'HTML',
+        keyboard: keyboard
+    };
 }
 
 function formatConfigView(config, user) {
@@ -1791,6 +2030,7 @@ function getMainKeyboard(userId) {
     
     if (isOwner) {
         buttons.push([{ text: '⚙️ Admin Panel', callback_data: 'admin_panel' }]);
+        buttons.push([{ text: '📖 Inline Help', callback_data: 'inline_help_menu' }]);
     }
     
     return buttons;
@@ -1885,7 +2125,8 @@ function getAdminKeyboard() {
             { text: '👥 Group Settings', callback_data: 'admin_group_settings' }
         ],
         [],
-        [{ text: '📢 Channel Settings', callback_data: 'admin_channel_settings' },
+        [
+            { text: '📢 Channel Settings', callback_data: 'admin_channel_settings' },
             { text: '👤 User Management', callback_data: 'admin_user_management' }
         ],
         [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
@@ -2144,6 +2385,1821 @@ function setupBot() {
         
         await sendWithImage(ctx, welcomeText, getMainKeyboard(userId));
     });
+
+
+    
+
+// ==================== INLINE MODE HANDLER ====================
+
+    // ========== INLINE HELP MENU BUTTON HANDLER ==========
+    bot.action('inline_help_menu', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        
+        // Check if user is owner
+        if (userId.toString() !== OWNER_ID) {
+            await ctx.answerCbQuery('⛔ Unauthorized!');
+            return;
+        }
+        
+        const botUsername = ctx.botInfo.username;
+        
+        // SHORTENED TEXT - Under 1024 characters
+        const text = `
+<b>📖 Inline Mode Guide</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>⚡ Quick VPN:</b>
+<code>@${botUsername} 1h</code> <code>@${botUsername} 3h</code>
+<code>@${botUsername} 6h</code> <code>@${botUsername} 12h</code>
+<code>@${botUsername} 1d</code> <code>@${botUsername} 7d</code>
+
+<b>📋 Commands:</b>
+<code>list</code> - Your configs
+<code>copy {id}</code> - Copy link
+<code>qr {id}</code> - QR code
+<code>delete {id}</code> - Delete
+
+<b>👤 User:</b>
+<code>get {user_id}</code> - Get configs
+<code>create {user_id} 1d</code> - Create for user
+
+<b>⚙️ Core:</b>
+<code>start</code> <code>stop</code> <code>restart</code>
+<code>status</code> <code>users</code> <code>stats</code>
+<code>clean</code> <code>info</code>
+
+━━━━━━━━━━━━━━━━━━━━━━
+💡 Type <code>@${botUsername}</code> in any chat!
+📌 Admin-only for security
+
+<b>Click a button below to try!</b>
+        `;
+        
+        const buttons = [
+            // Labels with noop
+            [{ text: '⚡ QUICK VPN', callback_data: 'noop' }],
+            [
+                { text: '⚡ 1 Hour', switch_inline_query_current_chat: '1h' },
+                { text: '⚡ 3 Hours', switch_inline_query_current_chat: '3h' },
+                { text: '⚡ 6 Hours', switch_inline_query_current_chat: '6h' }
+            ],
+            [
+                { text: '📅 1 Day', switch_inline_query_current_chat: '1d' },
+                { text: '📅 3 Days', switch_inline_query_current_chat: '3d' },
+                { text: '📅 7 Days', switch_inline_query_current_chat: '7d' }
+            ],
+            [{ text: '📋 MANAGEMENT', callback_data: 'noop' }],
+            [
+                { text: '👥 Users', switch_inline_query_current_chat: 'users' },
+                { text: '📋 List', switch_inline_query_current_chat: 'list' },
+            ],
+            [
+                { text: '👤 Get User', switch_inline_query_current_chat: 'get ' },
+                { text: '👤 Create User', switch_inline_query_current_chat: 'create ' },
+                { text: '🗑 Delete', switch_inline_query_current_chat: 'delete ' }
+            ],
+            [
+                { text: '📋 Copy', switch_inline_query_current_chat: 'copy ' },
+                { text: '📱 QR', switch_inline_query_current_chat: 'qr ' }
+            ],
+            [{ text: '⚙️ SYSTEM', callback_data: 'noop' }],
+            [
+                { text: '📊 Status', switch_inline_query_current_chat: 'status' },
+                { text: '📈 Stats', switch_inline_query_current_chat: 'stats' },
+                { text: '🧹 Clean', switch_inline_query_current_chat: 'clean' }
+            ],
+            [
+                { text: '▶️ Start', switch_inline_query_current_chat: 'start' },
+                { text: '⏹ Stop', switch_inline_query_current_chat: 'stop' },
+                { text: '🔄 Restart', switch_inline_query_current_chat: 'restart' }
+            ],
+            [
+                { text: 'ℹ️ Info', switch_inline_query_current_chat: 'info' },
+                { text: '📖 Inline Help', switch_inline_query_current_chat: 'help' }
+            ],
+            [
+                { text: '🔙 Back to Menu', callback_data: 'back_to_menu' }
+            ]
+        ];
+        
+        await editWithImage(ctx, text, buttons);
+    });
+
+    // ========== NO-OP HANDLER FOR LABELS ==========
+    bot.action('noop', async (ctx) => {
+        await ctx.answerCbQuery(); // Just acknowledge, does nothing
+    });
+
+
+// Inline Mode එක Handle කරන තැන
+bot.on('inline_query', async (ctx) => {
+    try {
+        const userId = ctx.from.id.toString();
+        const isOwner = userId === OWNER_ID;
+        
+        // Admin පමණක් Inline Mode භාවිතා කළ හැක
+        if (!isOwner) {
+            return ctx.answerInlineQuery([], {
+                switch_pm_text: '⛔ Access Denied - Only Admin can use this feature',
+                switch_pm_parameter: 'access_denied'
+            });
+        }
+
+        const query = ctx.inlineQuery.query.trim();
+        const botUsername = ctx.botInfo.username;
+        
+        // ========== QUICK VPN PRESETS ==========
+        const presets = {
+            '1h': 1,
+            '2h': 2,
+            '3h': 3,
+            '4h': 4,
+            '6h': 6,
+            '8h': 8,
+            '12h': 12,
+            '18h': 18,
+            '24h': 24,
+            '1d': 24,
+            '2d': 48,
+            '3d': 72,
+            '5d': 120,
+            '7d': 168,
+            '10d': 240,
+            '14d': 336,
+            '30m': 0.5,
+            '45m': 0.75,
+            '90m': 1.5,
+            '120m': 2
+        };
+
+        // Check if query matches a preset (only if no other command matches)
+        if (presets[query] !== undefined && 
+            !query.toLowerCase().startsWith('get ') && 
+            !query.toLowerCase().startsWith('create ') && 
+            !query.toLowerCase().startsWith('delete ') && 
+            !query.toLowerCase().startsWith('copy ') && 
+            !query.toLowerCase().startsWith('qr ') &&
+            query.toLowerCase() !== 'list' &&
+            query.toLowerCase() !== 'help' &&
+            query.toLowerCase() !== 'info' &&
+            query.toLowerCase() !== 'about' &&
+            query.toLowerCase() !== 'status' &&
+            query.toLowerCase() !== 'stats' &&
+            query.toLowerCase() !== 'clean' &&
+            query.toLowerCase() !== 'cleanup' &&
+            query.toLowerCase() !== 'start' &&
+            query.toLowerCase() !== 'stop' &&
+            query.toLowerCase() !== 'restart' &&
+            query.toLowerCase() !== 'users' &&
+            query.toLowerCase() !== 'listusers') {
+            
+            const duration = presets[query];
+            const config = await generateVPNConfig(userId, duration);
+            await saveVPNConfig(userId, config);
+
+            const expiryDate = new Date(config.expiryTime);
+            const timeDisplay = query;
+
+            const progressBar = '🟩'.repeat(10);
+
+            return ctx.answerInlineQuery([{
+                type: 'article',
+                id: `quick_${config.id}`,
+                title: `⚡ Quick VPN (${timeDisplay})`,
+                description: `Expires: ${expiryDate.toLocaleString()}`,
+                input_message_content: {
+                    message_text: `
+<b>⚡ Quick VPN Configuration</b>
+
+<blockquote><b>Duration:</b> ${timeDisplay}
+<b>Expires:</b> ${expiryDate.toLocaleString()}
+<b>ID:</b> <code>${config.id}</code>
+<b>┃${progressBar}┃ 100%</b></blockquote>
+
+<code>${config.config.vless}</code>
+
+<i>📋 Click "Copy Link" below to copy</i>`,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true
+                },
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '📋 Copy Link', switch_inline_query_current_chat: `copy ${config.id}` },
+                            { text: '📱 QR Code', switch_inline_query_current_chat: `qr ${config.id}` }
+                        ],
+                        [{ text: '🔄 More Options', switch_inline_query_current_chat: 'help' }]
+                    ]
+                }
+            }]);
+        }
+
+        // ========== COPY COMMAND ==========
+        if (query.toLowerCase().startsWith('copy ')) {
+            const configId = query.substring(5).trim();
+            const configPath = path.join(CONFIGS_DIR, `${configId}.json`);
+            
+            try {
+                const data = await fsPromises.readFile(configPath, 'utf8');
+                const config = JSON.parse(data);
+                
+                if (config.userId !== userId && !isOwner) {
+                    return ctx.answerInlineQuery([{
+                        type: 'article',
+                        id: 'unauthorized',
+                        title: '⛔ Unauthorized',
+                        input_message_content: {
+                            message_text: '⛔ You do not have permission to copy this config.',
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Access denied'
+                    }]);
+                }
+
+                return ctx.answerInlineQuery([{
+                    type: 'article',
+                    id: 'copied',
+                    title: '✅ Config Copied',
+                    input_message_content: {
+                        message_text: `
+<b>📋 VPN Configuration</b>
+
+<code>${config.config.vless}</code>
+
+<i>✅ Copy this link and paste in your VPN client</i>`,
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true
+                    },
+                    description: 'Copy the VPN link',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📱 QR Code', switch_inline_query_current_chat: `qr ${configId}` }],
+                            [{ text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }]
+                        ]
+                    }
+                }]);
+            } catch (error) {
+                return ctx.answerInlineQuery([{
+                    type: 'article',
+                    id: 'not_found',
+                    title: '❌ Config Not Found',
+                    input_message_content: {
+                        message_text: `❌ Configuration not found with ID: <code>${configId}</code>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Config not found'
+                }]);
+            }
+        }
+
+        // ========== QR CODE COMMAND ==========
+        if (query.toLowerCase().startsWith('qr ')) {
+            const configId = query.substring(3).trim();
+            const configPath = path.join(CONFIGS_DIR, `${configId}.json`);
+            
+            try {
+                const data = await fsPromises.readFile(configPath, 'utf8');
+                const config = JSON.parse(data);
+                
+                if (config.userId !== userId && !isOwner) {
+                    return ctx.answerInlineQuery([{
+                        type: 'article',
+                        id: 'unauthorized',
+                        title: '⛔ Unauthorized',
+                        input_message_content: {
+                            message_text: '⛔ You do not have permission to view this config.',
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Access denied'
+                    }]);
+                }
+
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(config.config.vless)}`;
+
+                return ctx.answerInlineQuery([{
+                    type: 'photo',
+                    id: `qr_${config.id}`,
+                    photo_url: qrUrl,
+                    thumb_url: qrUrl,
+                    title: '📱 QR Code',
+                    description: 'Scan to connect',
+                    caption: `
+<b>📱 VPN QR Code</b>
+
+<blockquote><b>Config ID:</b> <code>${config.id}</code>
+<b>Expires:</b> <code>${new Date(config.expiryTime).toLocaleString()}</code></blockquote>
+
+<i>📸 Scan this QR code with your VPN client</i>`,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📋 Copy Link', switch_inline_query_current_chat: `copy ${config.id}` }],
+                            [{ text: '🔄 More Options', switch_inline_query_current_chat: 'help' }]
+                        ]
+                    }
+                }]);
+            } catch (error) {
+                return ctx.answerInlineQuery([{
+                    type: 'article',
+                    id: 'not_found',
+                    title: '❌ Config Not Found',
+                    input_message_content: {
+                        message_text: `❌ Configuration not found with ID: <code>${configId}</code>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Config not found'
+                }]);
+            }
+        }
+
+        // ========== INFO/ABOUT COMMAND ==========
+        if (query.toLowerCase() === 'info' || query.toLowerCase() === 'about') {
+            const status = await getXrayStatus();
+            
+            let totalUsers = 0;
+            let totalConfigs = 0;
+            try {
+                const data = await fsPromises.readFile(DATA_FILE, 'utf8');
+                const users = JSON.parse(data);
+                totalUsers = Object.keys(users).length;
+                for (const userData of Object.values(users)) {
+                    if (userData.configs) {
+                        totalConfigs += userData.configs.filter(c => c.expiryTime > Date.now()).length;
+                    }
+                }
+            } catch (error) {}
+
+            return ctx.answerInlineQuery([{
+                type: 'article',
+                id: 'info',
+                title: 'ℹ️ Bot Information',
+                input_message_content: {
+                    message_text: `
+<b>ℹ️ VPN Bot Information</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>🤖 Bot:</b> KUDDA VPN Bot
+<b>👑 Owner:</b> <a href="https://t.me/mataberiyo">Mayantha</a>
+<b>📡 Status:</b> ${status.running ? '🟢 Online' : '🔴 Offline'}
+<b>🔒 Mode:</b> ${PRIVATE_MODE.enabled ? '🟢 Private' : '🟢 Public'}
+<b>👥 Users:</b> <code>${totalUsers}</code>
+<b>📋 Active Configs:</b> <code>${totalConfigs}</code></blockquote>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>📋 Quick Commands:</b>
+• <code>1h, 2h, 3h, 6h, 12h, 24h</code> - Quick VPN
+• <code>1d, 2d, 3d, 7d</code> - Day VPN
+• <code>list</code> - Your configs
+• <code>get &lt;user_id&gt;</code> - User configs
+• <code>copy &lt;id&gt;</code> - Copy config
+• <code>qr &lt;id&gt;</code> - QR code
+• <code>delete &lt;id&gt;</code> - Delete config
+• <code>help</code> - Full help</blockquote>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<i>💡 Type <code>@${botUsername}</code> followed by a command</i>`,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true
+                },
+                description: 'Bot information and commands',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '📖 Help', switch_inline_query_current_chat: 'help' }],
+                        [
+                            { text: '⚡ 1h', switch_inline_query_current_chat: '1h' },
+                            { text: '⚡ 12h', switch_inline_query_current_chat: '12h' },
+                            { text: '⚡ 1d', switch_inline_query_current_chat: '1d' }
+                        ],
+                        [
+                            { text: '📋 List', switch_inline_query_current_chat: 'list' },
+                            { text: '📊 Status', switch_inline_query_current_chat: 'status' }
+                        ]
+                    ]
+                }
+            }]);
+        }
+
+        // ========== ENHANCED HELP WITH BUTTONS ==========
+        if (!query || query.toLowerCase() === 'help' || query.toLowerCase() === '?') {
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'help',
+                    title: '📖 Inline Mode Help',
+                    input_message_content: {
+                        message_text: 
+`<b>🔐 VLESS Config Generator - Inline Mode</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>⚡ Quick VPN:</b>
+<code>1h</code> <code>2h</code> <code>3h</code> <code>6h</code>
+<code>12h</code> <code>24h</code> <code>1d</code> <code>7d</code></blockquote>
+
+<blockquote><b>📋 Manage Configs:</b>
+• <code>list</code> - View your configs
+• <code>copy {id}</code> - Copy VPN link
+• <code>qr {id}</code> - Get QR code
+• <code>delete {id}</code> - Delete config</blockquote>
+
+<blockquote><b>👤 User Management:</b>
+• <code>get {user_id}</code> - Get configs for a user
+• <code>create {user_id} 1d</code> - Create config for a user</blockquote>
+
+<blockquote><b>⚙️ Core Commands:</b>
+• <code>start</code> - Start Xray Core
+• <code>stop</code> - Stop Xray Core
+• <code>restart</code> - Restart Xray Core
+• <code>status</code> - Core Status
+• <code>users</code> - List all users
+• <code>stats</code> - System stats
+• <code>clean</code> - Clean expired configs</blockquote>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<i>💡 Click a button below to execute command</i>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'All available commands',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '⚡ QUICK VPN', callback_data: 'noop' }],
+                            [
+                                { text: '⚡ 1 Hour', switch_inline_query_current_chat: '1h' },
+                                { text: '⚡ 3 Hours', switch_inline_query_current_chat: '3h' },
+                                { text: '⚡ 6 Hours', switch_inline_query_current_chat: '6h' }
+                            ],
+                            [
+                                { text: '📅 1 Day', switch_inline_query_current_chat: '1d' },
+                                { text: '📅 3 Days', switch_inline_query_current_chat: '3d' },
+                                { text: '📅 7 Days', switch_inline_query_current_chat: '7d' }
+                            ],
+                            [{ text: '📋 MANAGEMENT', callback_data: 'noop' }],
+                            [
+                                { text: '👥 Users', switch_inline_query_current_chat: 'users' },
+                                { text: '📋 List', switch_inline_query_current_chat: 'list' },
+                            ],
+                            [
+                                { text: '👤 Get User', switch_inline_query_current_chat: 'get ' },
+                                { text: '👤 Create User', switch_inline_query_current_chat: 'create ' },
+                                { text: '🗑 Delete', switch_inline_query_current_chat: 'delete ' }
+                            ],
+                            [
+                                { text: '📋 Copy', switch_inline_query_current_chat: 'copy ' },
+                                { text: '📱 QR', switch_inline_query_current_chat: 'qr ' }
+                            ],
+                            [{ text: '⚙️ SYSTEM', callback_data: 'noop' }],
+                            [
+                                { text: '📊 Status', switch_inline_query_current_chat: 'status' },
+                                { text: '📈 Stats', switch_inline_query_current_chat: 'stats' },
+                                { text: '🧹 Clean', switch_inline_query_current_chat: 'clean' }
+                            ],
+                            [
+                                { text: '▶️ Start', switch_inline_query_current_chat: 'start' },
+                                { text: '⏹ Stop', switch_inline_query_current_chat: 'stop' },
+                                { text: '🔄 Restart', switch_inline_query_current_chat: 'restart' }
+                            ],
+                            [
+                                { text: 'ℹ️ Info', switch_inline_query_current_chat: 'info' },
+                                { text: '📖 Inline Help', switch_inline_query_current_chat: 'help' }
+                            ],
+                            [
+                                { text: '🔙 Back to Menu', callback_data: 'back_to_menu' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        // ========== SUPPORT MULTIPLE FORMATS ==========
+        let days = 0, hours = 0, minutes = 0;
+        let matched = false;
+        
+        const patterns = [
+            { regex: /(\d+)\s*d/i, type: 'days' },
+            { regex: /(\d+)\s*h/i, type: 'hours' },
+            { regex: /(\d+)\s*m/i, type: 'minutes' },
+            { regex: /d\s*(\d+)/i, type: 'days' },
+            { regex: /h\s*(\d+)/i, type: 'hours' },
+            { regex: /m\s*(\d+)/i, type: 'minutes' }
+        ];
+        
+        for (const pattern of patterns) {
+            const match = query.match(pattern.regex);
+            if (match) {
+                const value = parseInt(match[1]);
+                if (pattern.type === 'days') {
+                    days = Math.max(days, value);
+                    matched = true;
+                } else if (pattern.type === 'hours') {
+                    hours = Math.max(hours, value);
+                    matched = true;
+                } else if (pattern.type === 'minutes') {
+                    minutes = Math.max(minutes, value);
+                    matched = true;
+                }
+            }
+        }
+        
+        if (!matched) {
+            const numMatch = query.match(/^(\d+)$/);
+            if (numMatch) {
+                const num = parseInt(numMatch[1]);
+                if (num <= 24) {
+                    hours = num;
+                } else {
+                    days = Math.floor(num / 24);
+                    hours = num % 24;
+                }
+                matched = true;
+            }
+        }
+
+        // ========== GET USER CONFIGS BY USER ID ==========
+        if (query.toLowerCase().startsWith('get ')) {
+            const targetUserId = query.substring(4).trim();
+            
+            if (!targetUserId || isNaN(targetUserId)) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'invalid_id',
+                        title: '❌ Invalid User ID',
+                        input_message_content: {
+                            message_text: 
+`<b>❌ Invalid User ID</b>
+
+<blockquote>Please provide a valid User ID.
+
+<b>Usage:</b>
+<code>get 123456789</code></blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Invalid user ID format'
+                    }
+                ]);
+            }
+            
+            try {
+                const userData = await getUserData(targetUserId);
+                
+                if (!userData || !userData.configs || userData.configs.length === 0) {
+                    return ctx.answerInlineQuery([
+                        {
+                            type: 'article',
+                            id: 'no_user_configs',
+                            title: '📭 No Configs Found',
+                            input_message_content: {
+                                message_text: 
+`<b>📭 No Configurations Found</b>
+
+<blockquote>User ID: <code>${targetUserId}</code>
+
+This user has no active VPN configurations.</blockquote>`,
+                                parse_mode: 'HTML'
+                            },
+                            description: 'User has no configs'
+                        }
+                    ]);
+                }
+                
+                const now = Date.now();
+                const activeConfigs = userData.configs.filter(c => c.expiryTime > now);
+                
+                if (activeConfigs.length === 0) {
+                    return ctx.answerInlineQuery([
+                        {
+                            type: 'article',
+                            id: 'no_active_configs',
+                            title: '📭 No Active Configs',
+                            input_message_content: {
+                                message_text: 
+`<b>📭 No Active Configurations</b>
+
+<blockquote>User ID: <code>${targetUserId}</code>
+
+All configurations have expired.</blockquote>`,
+                                parse_mode: 'HTML'
+                            },
+                            description: 'All configs expired'
+                        }
+                    ]);
+                }
+                
+                let userDisplayName = 'Unknown User';
+                let userUsername = '';
+                try {
+                    const user = await ctx.telegram.getChat(parseInt(targetUserId));
+                    const firstName = user.first_name || 'Unknown';
+                    const lastName = user.last_name || '';
+                    userDisplayName = `${firstName} ${lastName}`.trim() || 'Unknown User';
+                    userUsername = user.username ? `@${user.username}` : '';
+                } catch (error) {
+                    userDisplayName = `User ${targetUserId}`;
+                }
+                
+                let configList = `<b>📋 VPN Configurations for User</b>\n\n`;
+                configList += `<blockquote><b>👤 User:</b> ${userDisplayName}`;
+                if (userUsername) configList += ` (${userUsername})`;
+                configList += `\n<b>🆔 User ID:</b> <code>${targetUserId}</code>`;
+                configList += `\n<b>📊 Active Configs:</b> <code>${activeConfigs.length}</code></blockquote>\n\n`;
+                configList += `<b>━━━━━━━━━━━━━━━━━━━━━━</b>\n\n`;
+                
+                for (let i = 0; i < activeConfigs.length; i++) {
+                    const config = activeConfigs[i];
+                    const remaining = Math.ceil((config.expiryTime - now) / (1000 * 60 * 60));
+                    const expiryDate = new Date(config.expiryTime);
+                    
+                    const configPath = path.join(CONFIGS_DIR, `${config.id}.json`);
+                    let fullConfig = null;
+                    try {
+                        const data = await fsPromises.readFile(configPath, 'utf8');
+                        fullConfig = JSON.parse(data);
+                    } catch (error) {
+                        continue;
+                    }
+                    
+                    if (!fullConfig) continue;
+                    
+                    const total = config.duration || 24;
+                    const percent = Math.min(100, Math.round((remaining / total) * 100));
+                    const filled = Math.round(percent / 10);
+                    const empty = 10 - filled;
+                    const bar = '🟩'.repeat(filled) + '⬜'.repeat(empty);
+                    
+                    configList += `<b>🔹 Config ${i + 1} - ${remaining}h/${total}h (${percent}%)</b>\n`;
+                    configList += `┃${bar}┃ \n`;
+                    configList += `<blockquote><b>ID:</b> <code>${config.id}</code>\n`;
+                    configList += `<b>Expires:</b> <code>${expiryDate.toLocaleString()}</code></blockquote>\n`;
+                    configList += `<code>${fullConfig.config.vless}</code>\n\n`;
+                }
+                
+                configList += `<i>🔰 Use <code>delete &lt;id&gt;</code> to remove a config</i>`;
+
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'user_configs',
+                        title: `📋 ${activeConfigs.length} Configs for ${targetUserId}`,
+                        description: `${activeConfigs.length} active configurations`,
+                        input_message_content: {
+                            message_text: configList,
+                            parse_mode: 'HTML',
+                            disable_web_page_preview: true
+                        },
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '🔄 Generate New for User', switch_inline_query_current_chat: `create ${targetUserId}` },
+                                    { text: '📋 Copy Config', switch_inline_query_current_chat: `copy ` }
+                                ],
+                                [
+                                    { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                                ]
+                            ]
+                        }
+                    }
+                ]);
+                
+            } catch (error) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'error',
+                        title: '❌ Error',
+                        input_message_content: {
+                            message_text: 
+`<b>❌ Error Getting Configs</b>
+
+<blockquote>${error.message || 'Please try again later.'}</blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Error occurred'
+                    }
+                ]);
+            }
+        }
+
+        // ========== CREATE CONFIG FOR SPECIFIC USER ==========
+        if (query.toLowerCase().startsWith('create ')) {
+            const targetUserId = query.substring(7).trim();
+            
+            if (!targetUserId || isNaN(targetUserId)) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'invalid_id',
+                        title: '❌ Invalid User ID',
+                        input_message_content: {
+                            message_text: 
+`<b>❌ Invalid User ID</b>
+
+<blockquote>Please provide a valid User ID.
+
+<b>Usage:</b>
+<code>create 123456789 1d</code></blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Invalid user ID format'
+                    }
+                ]);
+            }
+            
+            const parts = query.split(' ');
+            if (parts.length < 3) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'missing_time',
+                        title: '❌ Missing Time Format',
+                        input_message_content: {
+                            message_text: 
+`<b>❌ Missing Time Format</b>
+
+<blockquote>Please specify the duration.
+
+<b>Usage:</b>
+<code>create ${targetUserId} 1d</code>
+<code>create ${targetUserId} 2h</code>
+<code>create ${targetUserId} 30m</code></blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Time format required'
+                    }
+                ]);
+            }
+            
+            const timeQuery = parts.slice(2).join(' ');
+            
+            let days = 0, hours = 0, minutes = 0;
+            
+            const dMatch = timeQuery.match(/d\s*(\d+)/i);
+            const hMatch = timeQuery.match(/h\s*(\d+)/i);
+            const mMatch = timeQuery.match(/m\s*(\d+)/i);
+            
+            if (dMatch) days = parseInt(dMatch[1]);
+            if (hMatch) hours = parseInt(hMatch[1]);
+            if (mMatch) minutes = parseInt(mMatch[1]);
+            
+            if (days === 0 && hours === 0 && minutes === 0) {
+                const numMatch = timeQuery.match(/^(\d+)$/);
+                if (numMatch) {
+                    const num = parseInt(numMatch[1]);
+                    if (num <= 24) {
+                        hours = num;
+                    } else {
+                        days = Math.floor(num / 24);
+                        hours = num % 24;
+                    }
+                } else {
+                    return ctx.answerInlineQuery([
+                        {
+                            type: 'article',
+                            id: 'invalid_time',
+                            title: '❌ Invalid Time Format',
+                            input_message_content: {
+                                message_text: 
+`<b>❌ Invalid Time Format</b>
+
+<blockquote><b>Examples:</b>
+<code>create ${targetUserId} 1d</code>
+<code>create ${targetUserId} 2h</code>
+<code>create ${targetUserId} 1d2h30m</code></blockquote>`,
+                                parse_mode: 'HTML'
+                            },
+                            description: 'Invalid time format'
+                        }
+                    ]);
+                }
+            }
+            
+            let targetUserData = await getUserData(targetUserId);
+            if (!targetUserData) {
+                targetUserData = { configs: [] };
+                await saveUserData(targetUserId, targetUserData);
+            }
+            
+            const totalMinutes = days * 24 * 60 + hours * 60 + minutes;
+            const durationHours = Math.ceil(totalMinutes / 60);
+            
+            const config = await generateVPNConfig(targetUserId, durationHours);
+            await saveVPNConfig(targetUserId, config);
+            
+            let userDisplayName = 'Unknown User';
+            let userUsername = '';
+            try {
+                const user = await ctx.telegram.getChat(parseInt(targetUserId));
+                const firstName = user.first_name || 'Unknown';
+                const lastName = user.last_name || '';
+                userDisplayName = `${firstName} ${lastName}`.trim() || 'Unknown User';
+                userUsername = user.username ? `@${user.username}` : '';
+            } catch (error) {}
+            
+            let timeStr = '';
+            if (days > 0) timeStr += `${days}d `;
+            if (hours > 0) timeStr += `${hours}h `;
+            if (minutes > 0) timeStr += `${minutes}m `;
+            timeStr = timeStr.trim() || '0m';
+            
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'config_created',
+                    title: '✅ Config Created',
+                    input_message_content: {
+                        message_text: 
+`<b>✅ VPN Config Created Successfully</b>
+
+<blockquote><b>👤 User:</b> ${userDisplayName}${userUsername ? ` (${userUsername})` : ''}
+<b>🆔 User ID:</b> <code>${targetUserId}</code>
+<b>⏱ Duration:</b> ${timeStr}
+<b>🆔 Config ID:</b> <code>${config.id}</code>
+<b>📅 Expires:</b> <code>${new Date(config.expiryTime).toLocaleString()}</code></blockquote>
+
+<code>${config.config.vless}</code>
+
+<b>📱 Use this link in your VPN client.</b>`,
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true
+                    },
+                    description: `Config created for ${targetUserId}`,
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📋 Get User Configs', switch_inline_query_current_chat: `get ${targetUserId}` },
+                                { text: '📋 Copy Config', switch_inline_query_current_chat: `copy ${config.id}` }
+                            ],
+                            [
+                                { text: '📱 QR Code', switch_inline_query_current_chat: `qr ${config.id}` },
+                                { text: '🔄 Create Another', switch_inline_query_current_chat: `create ${targetUserId}` }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        // ========== LIST CONFIGS ==========
+        if (query.toLowerCase() === 'list') {
+            const configs = await getActiveConfigs(userId);
+            
+            if (configs.length === 0) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'no_configs',
+                        title: '📭 No Active Configs',
+                        input_message_content: {
+                            message_text: 
+`<b>📭 No Active Configurations</b>
+
+<blockquote>You don't have any active VPN configurations.
+
+Use <code>1d</code>, <code>2h</code>, <code>30m</code> to create one.</blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'You have no active VPN configs',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '⚡ 1 Hour', switch_inline_query_current_chat: '1h' },
+                                    { text: '⚡ 12 Hours', switch_inline_query_current_chat: '12h' }
+                                ],
+                                [
+                                    { text: '📅 1 Day', switch_inline_query_current_chat: '1d' },
+                                    { text: '📅 7 Days', switch_inline_query_current_chat: '7d' }
+                                ],
+                                [
+                                    { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                                ]
+                            ]
+                        }
+                    }
+                ]);
+            }
+            
+            let userInfo = '';
+            try {
+                const user = await ctx.telegram.getChat(userId);
+                const firstName = user.first_name || 'Unknown';
+                const lastName = user.last_name || '';
+                const username = user.username ? `@${user.username}` : 'No username';
+                const fullName = `${firstName} ${lastName}`.trim() || 'Unknown User';
+                
+                userInfo = `<b>👤 User:</b> ${fullName} (${username})\n`;
+                userInfo += `<b>🆔 User ID:</b> <code>${userId}</code>`;
+            } catch (error) {
+                userInfo = `<b>🆔 User ID:</b> <code>${userId}</code>`;
+            }
+            
+            let configList = `<b>📋 Your Active Configurations (${configs.length})</b>\n\n`;
+            configList += `<blockquote>${userInfo}</blockquote>\n\n`;
+            
+            for (let i = 0; i < configs.length; i++) {
+                const config = configs[i];
+                const remaining = Math.ceil((config.expiryTime - Date.now()) / (1000 * 60 * 60));
+                const expiryDate = new Date(config.expiryTime);
+                
+                const total = config.duration || 24;
+                const percent = Math.min(100, Math.round((remaining / total) * 100));
+                const filled = Math.round(percent / 10);
+                const empty = 10 - filled;
+                const bar = '🟩'.repeat(filled) + '⬜'.repeat(empty);
+                
+                configList += `<b>🔹 Config ${i + 1} - ${remaining}h/${total}h (${percent}%)</b>\n`;
+                configList += `┃${bar}┃ \n`;
+                configList += `<b>ID:</b> <code>${config.id}</code>\n`;
+                configList += `<b>Expires:</b> <code>${expiryDate.toLocaleString()}</code>\n`;
+                configList += `<b>Remaining:</b> <code>${remaining}h</code>\n\n`;
+            }
+            
+            configList += `<i>🔰 Use <code>delete &lt;id&gt;</code> to remove a config</i>`;
+
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'config_list',
+                    title: `📋 Configs (${configs.length})`,
+                    description: `${configs.length} active configurations`,
+                    input_message_content: {
+                        message_text: configList,
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true
+                    },
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📋 Copy Config', switch_inline_query_current_chat: 'copy ' },
+                                { text: '📱 QR Code', switch_inline_query_current_chat: 'qr ' }
+                            ],
+                            [
+                                { text: '🔄 Generate New', switch_inline_query_current_chat: '' },
+                                { text: '🗑 Delete Config', switch_inline_query_current_chat: 'delete ' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+                
+        // ========== DELETE CONFIG ==========
+        if (query.toLowerCase().startsWith('delete ')) {
+            const id = query.substring(7).trim();
+            
+            if (!id) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'delete_help',
+                        title: '🗑 Delete Config',
+                        input_message_content: {
+                            message_text: 
+`<b>🗑 Delete Configuration</b>
+
+<blockquote>Please provide a Config ID to delete.
+
+<b>Usage:</b>
+<code>delete &lt;config_id&gt;</code>
+
+Use <code>list</code> to see your configs.</blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'How to delete a config',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '📋 List Configs', switch_inline_query_current_chat: 'list' },
+                                    { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                                ]
+                            ]
+                        }
+                    }
+                ]);
+            }
+            
+            const userData = await getUserData(userId);
+            
+            if (!userData || !userData.configs) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'delete_fail',
+                        title: '❌ Config Not Found',
+                        input_message_content: {
+                            message_text: `<b>❌ Config Not Found</b>\n\n<blockquote>No config found with ID: <code>${id}</code></blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Config not found'
+                    }
+                ]);
+            }
+            
+            const config = userData.configs.find(c => c.id === id);
+            
+            if (!config) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'delete_fail',
+                        title: '❌ Config Not Found',
+                        input_message_content: {
+                            message_text: `<b>❌ Config Not Found</b>\n\n<blockquote>No config found with ID: <code>${id}</code></blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Config not found'
+                    }
+                ]);
+            }
+            
+            await deleteUserConfig(userId, id);
+            
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'delete_success',
+                    title: '✅ Config Deleted',
+                    input_message_content: {
+                        message_text: 
+`<b>✅ Config Deleted Successfully</b>
+
+<blockquote>Config ID: <code>${id}</code>
+Duration: ${config.duration}h
+
+Your VPN has been disconnected.</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'VPN config deleted',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📋 List Configs', switch_inline_query_current_chat: 'list' },
+                                { text: '🔄 Generate New', switch_inline_query_current_chat: '' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+        
+        // ========== CORE MANAGEMENT ==========
+        if (query.toLowerCase() === 'start') {
+            await startXray();
+            const status = await getXrayStatus();
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'core_start',
+                    title: '✅ Xray Started',
+                    input_message_content: {
+                        message_text: 
+`<b>✅ Xray Core Started</b>
+
+<blockquote><b>Status:</b> ${status.running ? '🟢 Running' : '🔴 Stopped'}
+<b>PID:</b> <code>${status.pid || 'N/A'}</code>
+
+Xray service has been started successfully.</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Xray service started',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📊 Status', switch_inline_query_current_chat: 'status' },
+                                { text: '⏹ Stop', switch_inline_query_current_chat: 'stop' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        if (query.toLowerCase() === 'stop') {
+            await stopXray(true);
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'core_stop',
+                    title: '⏹ Xray Stopped',
+                    input_message_content: {
+                        message_text: 
+`<b>⏹ Xray Core Stopped</b>
+
+<blockquote>Xray service has been stopped successfully.
+
+Use <code>start</code> to start it again.</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Xray service stopped',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '▶️ Start', switch_inline_query_current_chat: 'start' },
+                                { text: '📊 Status', switch_inline_query_current_chat: 'status' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        if (query.toLowerCase() === 'restart') {
+            await restartXray();
+            const status = await getXrayStatus();
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'core_restart',
+                    title: '🔄 Xray Restarted',
+                    input_message_content: {
+                        message_text: 
+`<b>🔄 Xray Core Restarted</b>
+
+<blockquote><b>Status:</b> ${status.running ? '🟢 Running' : '🔴 Stopped'}
+<b>PID:</b> <code>${status.pid || 'N/A'}</code>
+<b>Restarts:</b> <code>${status.restarts}</code>
+
+Xray has been restarted successfully.</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Xray service restarted',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📊 Status', switch_inline_query_current_chat: 'status' },
+                                { text: '⏹ Stop', switch_inline_query_current_chat: 'stop' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        if (query.toLowerCase() === 'status') {
+            const status = await getXrayStatus();
+            const memUsage = process.memoryUsage();
+            const uptime = process.uptime();
+            
+            let totalUsers = 0;
+            let totalConfigs = 0;
+            try {
+                const data = await fsPromises.readFile(DATA_FILE, 'utf8');
+                const users = JSON.parse(data);
+                totalUsers = Object.keys(users).length;
+                for (const userData of Object.values(users)) {
+                    if (userData.configs) {
+                        totalConfigs += userData.configs.filter(c => c.expiryTime > Date.now()).length;
+                    }
+                }
+            } catch (error) {}
+
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'core_status',
+                    title: '📊 System Status',
+                    input_message_content: {
+                        message_text: 
+`<b>📊 System Status</b>
+
+<blockquote><b>Xray Core:</b>
+<b>Status:</b> ${status.running ? '🟢 Running' : '🔴 Stopped'}
+<b>PID:</b> <code>${status.pid || 'N/A'}</code>
+<b>Restarts:</b> <code>${status.restarts}</code>
+
+<b>System:</b>
+<b>Memory:</b> <code>${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB</code>
+<b>Uptime:</b> <code>${Math.floor(uptime / 60)} min</code>
+<b>Users:</b> <code>${totalUsers}</code>
+<b>Active Configs:</b> <code>${totalConfigs}</code>
+
+<b>Settings:</b>
+<b>Private Mode:</b> ${PRIVATE_MODE.enabled ? '🟢 On' : '🔴 Off'}
+<b>Groups:</b> ${GROUP_SETTINGS.enabled ? '🟢 Enabled' : '🔴 Disabled'}</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Full system status',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '🔄 Restart', switch_inline_query_current_chat: 'restart' },
+                                { text: '📈 Stats', switch_inline_query_current_chat: 'stats' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        // ========== CLEAN EXPIRED ==========
+        if (query.toLowerCase() === 'clean' || query.toLowerCase() === 'cleanup') {
+            const count = await cleanupExpiredConfigs();
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'cleanup',
+                    title: '🧹 Cleaned Expired',
+                    input_message_content: {
+                        message_text: 
+`<b>🧹 Cleanup Complete</b>
+
+<blockquote>Removed <code>${count}</code> expired configuration(s).
+
+System is now clean.</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Removed expired configs',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📊 Status', switch_inline_query_current_chat: 'status' },
+                                { text: '📈 Stats', switch_inline_query_current_chat: 'stats' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        // ========== STATS ==========
+        if (query.toLowerCase() === 'stats') {
+            let totalUsers = 0;
+            let totalConfigs = 0;
+            let expiredConfigs = 0;
+            const now = Date.now();
+            
+            try {
+                const data = await fsPromises.readFile(DATA_FILE, 'utf8');
+                const users = JSON.parse(data);
+                totalUsers = Object.keys(users).length;
+                for (const userData of Object.values(users)) {
+                    if (userData.configs) {
+                        for (const config of userData.configs) {
+                            if (config.expiryTime > now) {
+                                totalConfigs++;
+                            } else {
+                                expiredConfigs++;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {}
+
+            const memUsage = process.memoryUsage();
+            const uptime = process.uptime();
+
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'stats',
+                    title: '📈 Detailed Stats',
+                    input_message_content: {
+                        message_text: 
+`<b>📈 Detailed Statistics</b>
+
+<blockquote><b>Users:</b>
+<b>Total Users:</b> <code>${totalUsers}</code>
+<b>Active Configs:</b> <code>${totalConfigs}</code>
+<b>Expired Configs:</b> <code>${expiredConfigs}</code>
+
+<b>System:</b>
+<b>Memory:</b> <code>${(memUsage.heapUsed / 1024 / 1024).toFixed(2)} MB</code>
+<b>Uptime:</b> <code>${Math.floor(uptime / 60)} min</code>
+<b>Platform:</b> <code>${process.platform}</code>
+<b>Node:</b> <code>${process.version}</code>
+
+<b>Settings:</b>
+<b>Private Mode:</b> ${PRIVATE_MODE.enabled ? '🟢 On' : '🔴 Off'}
+<b>Allowed Users:</b> <code>${PRIVATE_MODE.allowed_users.length}</code>
+<b>Blocked Users:</b> <code>${PRIVATE_MODE.blocked_users.length}</code></blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Full system statistics',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📊 Status', switch_inline_query_current_chat: 'status' },
+                                { text: '🧹 Clean', switch_inline_query_current_chat: 'clean' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        // ========== LIST USERS ==========
+        if (query.toLowerCase() === 'users' || query.toLowerCase() === 'listusers') {
+            try {
+                const data = await fsPromises.readFile(DATA_FILE, 'utf8');
+                const users = JSON.parse(data);
+                const userKeys = Object.keys(users);
+                
+                if (userKeys.length === 0) {
+                    return ctx.answerInlineQuery([
+                        {
+                            type: 'article',
+                            id: 'no_users',
+                            title: '📭 No Users Found',
+                            input_message_content: {
+                                message_text: 
+`<b>📭 No Users Found</b>
+
+<blockquote>No users have used the bot yet.</blockquote>`,
+                                parse_mode: 'HTML'
+                            },
+                            description: 'No users registered'
+                        }
+                    ]);
+                }
+
+                // ========== BUILD USER LIST ==========
+                let userList = `<b>📋 Registered Users (${userKeys.length})</b>\n\n`;
+                let userCount = 0;
+                
+                // Create a map to store user info
+                const userInfoMap = {};
+                
+                // First, get all user info from Telegram
+                for (const uid of userKeys) {
+                    try {
+                        const user = await ctx.telegram.getChat(parseInt(uid));
+                        const firstName = user.first_name || 'Unknown';
+                        const lastName = user.last_name || '';
+                        const fullName = `${firstName} ${lastName}`.trim() || 'Unknown User';
+                        const username = user.username ? `@${user.username}` : '';
+                        
+                        userInfoMap[uid] = {
+                            fullName: fullName,
+                            username: username
+                        };
+                    } catch (error) {
+                        // If can't get from Telegram, try to get from Xray config
+                        try {
+                            const xrayData = await readJsonSafe(XRAY_CONFIG, null);
+                            if (xrayData && xrayData.inbounds) {
+                                for (const inbound of xrayData.inbounds) {
+                                    if (inbound.settings && inbound.settings.clients) {
+                                        for (const client of inbound.settings.clients) {
+                                            if (client.email && client.email.includes(`user_${uid}`)) {
+                                                const name = client.email.replace(`user_${uid}_`, '');
+                                                userInfoMap[uid] = {
+                                                    fullName: name || 'Unknown User',
+                                                    username: ''
+                                                };
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {}
+                        
+                        // If still no info, use default
+                        if (!userInfoMap[uid]) {
+                            userInfoMap[uid] = {
+                                fullName: 'Unknown User',
+                                username: ''
+                            };
+                        }
+                    }
+                }
+                
+                // Now build the list with format: ID - FullName (Username) VPNs: X
+                for (const uid of userKeys) {
+                    if (userCount >= 20) {
+                        userList += `\n<i>... and ${userKeys.length - 20} more users</i>`;
+                        break;
+                    }
+                    
+                    const userData = users[uid];
+                    const configs = userData.configs || [];
+                    const active = configs.filter(c => c.expiryTime > Date.now());
+                    
+                    // Get user info from map
+                    const info = userInfoMap[uid] || { fullName: 'Unknown User', username: '' };
+                    const displayName = info.fullName;
+                    const username = info.username;
+                    
+                    // Format: ID - FullName (Username) VPNs: X
+                    let userLine = `<code>${uid}</code> - ${displayName}`;
+                    if (username) {
+                        userLine += ` (${username})`;
+                    }
+                    userLine += ` VPNs: <b>${active.length}</b>`;
+                    
+                    userList += `${userLine}\n`;
+                    userCount++;
+                }
+                
+                userList += `\n<i>💡 Use <code>get &lt;user_id&gt;</code> to view configs</i>`;
+
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'user_list',
+                        title: `👥 Users (${userKeys.length})`,
+                        input_message_content: {
+                            message_text: userList,
+                            parse_mode: 'HTML',
+                            disable_web_page_preview: true
+                        },
+                        description: `Total ${userKeys.length} registered users`,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '👤 Get User', switch_inline_query_current_chat: 'get ' },
+                                    { text: '👤 Create User', switch_inline_query_current_chat: 'create ' }
+                                ],
+                                [
+                                    { text: '📋 List Configs', switch_inline_query_current_chat: 'list' },
+                                    { text: '📊 Status', switch_inline_query_current_chat: 'status' }
+                                ],
+                                [
+                                    { text: '📈 Stats', switch_inline_query_current_chat: 'stats' },
+                                    { text: '🧹 Clean', switch_inline_query_current_chat: 'clean' }
+                                ],
+                                [
+                                    { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                                ]
+                            ]
+                        }
+                    }
+                ]);
+                
+            } catch (error) {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'error',
+                        title: '❌ Error',
+                        input_message_content: {
+                            message_text: 
+`<b>❌ Error loading users</b>
+
+<blockquote>${error.message}</blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Error occurred'
+                    }
+                ]);
+            }
+        }
+        
+        // ========== CHECK IF WE HAVE TIME VALUES ==========
+        if (days === 0 && hours === 0 && minutes === 0) {
+            const numMatch = query.match(/^(\d+)$/);
+            if (numMatch) {
+                const num = parseInt(numMatch[1]);
+                if (num <= 24) {
+                    hours = num;
+                } else {
+                    days = Math.floor(num / 24);
+                    hours = num % 24;
+                }
+            } else {
+                return ctx.answerInlineQuery([
+                    {
+                        type: 'article',
+                        id: 'error',
+                        title: '❌ Invalid Format',
+                        input_message_content: {
+                            message_text: 
+`<b>❌ Invalid Format!</b>
+
+<blockquote><b>✅ Supported Formats:</b>
+<code>1d</code> or <code>d 1</code> - 1 day
+<code>2h</code> or <code>h 2</code> - 2 hours
+<code>30m</code> or <code>m 30</code> - 30 minutes
+<code>1d2h30m</code> - 1d 2h 30m
+<code>24</code> - 24 hours
+<code>168</code> - 168 hours (7 days)
+
+<b>⚙️ Commands:</b>
+<code>help</code> - Show all commands
+<code>list</code> - List all active configs
+<code>users</code> - List all users
+<code>status</code> - System status
+<code>start</code> - Start Xray
+<code>stop</code> - Stop Xray
+<code>restart</code> - Restart Xray
+<code>stats</code> - Detailed stats
+<code>clean</code> - Clean expired
+<code>info</code> - Bot information</blockquote>`,
+                            parse_mode: 'HTML'
+                        },
+                        description: 'Invalid command format',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '❓ Help', switch_inline_query_current_chat: 'help' },
+                                    { text: '📋 List', switch_inline_query_current_chat: 'list' }
+                                ],
+                                [
+                                    { text: 'ℹ️ Info', switch_inline_query_current_chat: 'info' }
+                                ]
+                            ]
+                        }
+                    }
+                ]);
+            }
+        }
+
+        // ========== CHECK DURATION LIMIT ==========
+        const totalHours = days * 24 + hours + (minutes / 60);
+        const maxDuration = CONFIG.user_limits?.max_duration_hours || 24;
+        
+        if (totalHours > maxDuration * 30 && !isOwner) {
+            return ctx.answerInlineQuery([
+                {
+                    type: 'article',
+                    id: 'error',
+                    title: '❌ Duration Too Long',
+                    input_message_content: {
+                        message_text: 
+`<b>❌ Duration Too Long!</b>
+
+<blockquote>Maximum duration is ${maxDuration} hours.
+You requested: ${Math.round(totalHours)} hours
+
+Please use a shorter duration.</blockquote>`,
+                        parse_mode: 'HTML'
+                    },
+                    description: 'Duration exceeds limit',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '⏱ 1 Day', switch_inline_query_current_chat: '1d' },
+                                { text: '⏱ 12 Hours', switch_inline_query_current_chat: '12h' }
+                            ],
+                            [
+                                { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                            ]
+                        ]
+                    }
+                }
+            ]);
+        }
+
+        // ========== GENERATE CONFIG ==========
+        const now = new Date();
+        const expiryDate = new Date(now.getTime() + 
+            days * 24 * 60 * 60 * 1000 + 
+            hours * 60 * 60 * 1000 + 
+            minutes * 60 * 1000
+        );
+
+        const totalMinutes = days * 24 * 60 + hours * 60 + minutes;
+        const durationHours = Math.ceil(totalMinutes / 60);
+        
+        const config = await generateVPNConfig(userId, durationHours);
+        await saveVPNConfig(userId, config);
+
+        let timeStr = '';
+        if (days > 0) timeStr += `${days}d `;
+        if (hours > 0) timeStr += `${hours}h `;
+        if (minutes > 0) timeStr += `${minutes}m `;
+        timeStr = timeStr.trim() || '0m';
+
+        const progressBar = '🟩'.repeat(10);
+
+        const result = {
+            type: 'article',
+            id: config.id,
+            title: `🔑 VLESS Config (${timeStr})`,
+            description: `Expires: ${expiryDate.toLocaleString()}`,
+            input_message_content: {
+                message_text: 
+`<b>🔐 VLESS VPN Configuration</b>
+
+<blockquote><b>ID:</b> <code>${config.id}</code>
+<b>Status:</b> ✅ Generated successfully
+<b>Expires:</b> 🕐 ${expiryDate.toLocaleString()}
+<b>Remaining:</b> ${timeStr}
+<b>┃${progressBar}┃ 100%</b></blockquote>
+
+<code>${config.config.vless}</code>
+
+<b>📱 How to use:</b>
+1. Copy the URL above
+2. Open your V2RayNG/Nekoha/Other client
+3. Import the configuration
+4. Connect and enjoy! 🚀`,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+            },
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '📋 Copy Link', switch_inline_query_current_chat: `copy ${config.id}` },
+                        { text: '📱 QR Code', switch_inline_query_current_chat: `qr ${config.id}` }
+                    ],
+                    [
+                        { text: '🔄 Generate New', switch_inline_query_current_chat: '' },
+                        { text: '📋 List Configs', switch_inline_query_current_chat: 'list' }
+                    ],
+                    [
+                        { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
+                    ]
+                ]
+            }
+        };
+
+        ctx.answerInlineQuery([result], {
+            cache_time: 0,
+            is_personal: true
+        });
+        
+    } catch (error) {
+        console.error('Inline query error:', error);
+        ctx.answerInlineQuery([
+            {
+                type: 'article',
+                id: 'error',
+                title: '❌ Error',
+                input_message_content: {
+                    message_text: `<b>❌ An error occurred</b>\n\n<blockquote>${error.message || 'Please try again later.'}</blockquote>`,
+                    parse_mode: 'HTML'
+                },
+                description: 'Error generating config'
+            }
+        ]);
+    }
+});
+
+// ==================== SWITCH PM HANDLER ====================
+// bot.on('callback_query', async (ctx) => {
+//     try {
+//         const data = ctx.callbackQuery.data;
+        
+//         if (data.startsWith('copy_')) {
+//             return;
+//         }
+        
+//         if (data.startsWith('qr_')) {
+//             return;
+//         }
+        
+//         if (data.startsWith('delete_confirm_')) {
+//             return;
+//         }
+        
+//     } catch (error) {
+//         console.error('Callback query error:', error);
+//     }
+// }, 1);
+
+
+bot.on('callback_query', async (ctx, next) => {
+    try {
+        const data = ctx.callbackQuery.data;
+        
+        // Special handlers for specific actions
+        if (data.startsWith('copy_') || data.startsWith('qr_') || data.startsWith('delete_confirm_')) {
+            // Handle these specific actions here or let them pass through
+            return next(); // Let other handlers process them
+        }
+        
+        // For all other callback queries, let the action handlers process them
+        return next();
+        
+    } catch (error) {
+        console.error('Callback query error:', error);
+        return next();
+    }
+});
+
+
+
+// ==================== INLINE MODE HELP COMMAND ====================
+bot.command('inlinehelp', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    const isOwner = userId === OWNER_ID;
+    
+    if (!isOwner) {
+        return ctx.reply('⛔ Access Denied. Only admin can use this feature.');
+    }
+    
+    await ctx.replyWithHTML(`
+<b>📖 Inline Mode Help</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote>You can use the bot in inline mode by typing:
+<code>@${ctx.botInfo.username} &lt;command&gt;</code></blockquote>
+
+<blockquote><b>⚡ Quick VPN:</b>
+<code>1h</code> <code>2h</code> <code>3h</code> <code>6h</code>
+<code>12h</code> <code>24h</code> <code>1d</code> <code>7d</code></blockquote>
+
+<blockquote><b>📋 Manage Configs:</b>
+<code>list</code> - View your configs
+<code>copy {id}</code> - Copy VPN link
+<code>qr {id}</code> - Get QR code
+<code>delete {id}</code> - Delete config</blockquote>
+
+<blockquote><b>👤 User Management:</b>
+<code>get 123456789</code> - Get configs for a user
+<code>create 123456789 1d</code> - Create config for a user</blockquote>
+
+<blockquote><b>⚙️ Core Commands:</b>
+<code>start</code> - Start Xray
+<code>stop</code> - Stop Xray
+<code>restart</code> - Restart Xray
+<code>status</code> - System status
+<code>users</code> - List all users
+<code>stats</code> - Detailed stats
+<code>clean</code> - Clean expired
+<code>info</code> - Bot information</blockquote>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>💡 Click "Inline Mode Help" button below to open inline mode!</b>
+    `);
+});
+
+
+
+// ==================== INLINE MODE STATUS COMMAND ====================
+bot.command('inlinestatus', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    const isOwner = userId === OWNER_ID;
+    
+    if (!isOwner) {
+        return ctx.reply('⛔ Access Denied. Only admin can use this feature.');
+    }
+    
+    const activeConfigs = await getActiveConfigs(userId);
+    
+    let text = `
+<b>📊 Inline Mode Status</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>Status:</b> ${PRIVATE_MODE.enabled ? '🟢 Private Mode On' : '🟢 Public Mode'}
+<b>Your Active Configs:</b> <code>${activeConfigs.length}</code>
+<b>Bot Username:</b> <code>@${ctx.botInfo.username}</code>
+━━━━━━━━━━━━━━━━━━━━━━
+
+<b>⚡ Quick Commands:</b>
+<code>@${ctx.botInfo.username} 1h</code> - 1 Hour VPN
+<code>@${ctx.botInfo.username} 12h</code> - 12 Hour VPN
+<code>@${ctx.botInfo.username} 1d</code> - 1 Day VPN
+<code>@${ctx.botInfo.username} 7d</code> - 7 Day VPN
+
+<b>📋 Management:</b>
+<code>@${ctx.botInfo.username} list</code> - View configs
+<code>@${ctx.botInfo.username} copy {id}</code> - Copy config
+<code>@${ctx.botInfo.username} qr {id}</code> - Get QR code
+<code>@${ctx.botInfo.username} delete {id}</code> - Delete config
+
+<b>👤 User Management:</b>
+<code>@${ctx.botInfo.username} get {user_id}</code> - Get user configs
+<code>@${ctx.botInfo.username} create {user_id} 1d</code> - Create for user
+
+<b>⚙️ Core:</b>
+<code>@${ctx.botInfo.username} status</code> - System status
+<code>@${ctx.botInfo.username} stats</code> - Detailed stats
+<code>@${ctx.botInfo.username} clean</code> - Clean expired
+<code>@${ctx.botInfo.username} users</code> - List all users
+<code>@${ctx.botInfo.username} info</code> - Bot info
+
+<b>💡 Type <code>@${ctx.botInfo.username}</code> followed by a command in any chat!</b>
+    `;
+    
+    await ctx.replyWithHTML(text);
+});
+
+
+
+
+
+
+
+
+
 
     // ========== HELP COMMAND ==========
     bot.help(async (ctx) => {
@@ -2536,6 +4592,7 @@ ${createLoadingBar(100, '🟩')}
         `;
         await editWithImage(ctx, text, [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]]);
     });
+    
 
     // ========== TEXT HANDLER FOR CUSTOM DURATIONS ==========
     bot.on('text', async (ctx) => {
@@ -2584,16 +4641,54 @@ ${createLoadingBar(100, '🟩')}
         }
     });
 
+    // // ========== LIST CONFIGS ==========
+    // bot.action('list_configs', async (ctx) => {
+    //     await ctx.answerCbQuery();
+    //     const userId = ctx.from.id;
+    //     const configs = await getActiveConfigs(userId);
+        
+    //     const messageData = formatConfigList(configs, userId);
+    //     const keyboard = configs.length > 0 ? getConfigListKeyboard(configs) : [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]];
+        
+    //     await editWithImage(ctx, messageData.text, keyboard);
+    // });
+
     // ========== LIST CONFIGS ==========
     bot.action('list_configs', async (ctx) => {
         await ctx.answerCbQuery();
         const userId = ctx.from.id;
         const configs = await getActiveConfigs(userId);
         
-        const messageData = formatConfigList(configs, userId);
-        const keyboard = configs.length > 0 ? getConfigListKeyboard(configs) : [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]];
+        // Reset pagination for this user
+        if (configPagination[userId]) {
+            configPagination[userId].page = 0;
+        }
         
-        await editWithImage(ctx, messageData.text, keyboard);
+        const result = formatConfigList(configs, userId, 0);
+        const keyboard = result.keyboard || [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]];
+        
+        await editWithImage(ctx, result.text, keyboard);
+    });
+
+    // ========== CONFIG PAGE NAVIGATION ==========
+    bot.action(/^config_page_(\d+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        const page = parseInt(ctx.match[1]);
+        
+        // Get cached configs for this user
+        let configs = [];
+        if (configPagination[userId] && configPagination[userId].configs) {
+            configs = configPagination[userId].configs;
+        } else {
+            // If not cached, fetch again
+            configs = await getActiveConfigs(userId);
+        }
+        
+        const result = formatConfigList(configs, userId, page);
+        const keyboard = result.keyboard || [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]];
+        
+        await editWithImage(ctx, result.text, keyboard);
     });
 
     // ========== VIEW CONFIG ==========
@@ -4118,7 +6213,7 @@ async function startBot() {
         console.log('🤖 Bot started!');
         console.log('🔄 Starting Xray...');
         await startXray();
-        
+
         startCleanupScheduler();
         startXrayMonitor();
         startMemoryMonitor(); // Add memory monitor
