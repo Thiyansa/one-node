@@ -11,6 +11,7 @@ const http = require('http');
 let CONFIG = {};
 let BOT_TOKEN, OWNER_ID, DOMAIN, PORT, PATH, IMAGE_URL;
 let CACHED_IMAGE_PATH = null;
+let IMAGE_CACHE_CHECKED = false;
 
 // Private mode settings
 let PRIVATE_MODE = { enabled: false, allowed_users: [], blocked_users: [] };
@@ -311,7 +312,9 @@ async function checkPermissions(ctx) {
 <a href="https://t.me/mataberiyo">Admin</a>
             `, { parse_mode: 'HTML' });
         } catch (e) {
-            // User might not be able to receive messages
+            // User has blocked the bot or cannot receive messages
+            // Just log and continue
+            console.log(`🔇 Cannot send message to blocked user ${userId}: ${e.message}`);
         }
         return false;
     }
@@ -321,7 +324,8 @@ async function checkPermissions(ctx) {
         // If private mode is enabled, check if user is allowed
         if (PRIVATE_MODE.enabled) {
             if (!PRIVATE_MODE.allowed_users.includes(userId.toString())) {
-                await ctx.reply(`
+                try {
+                    await ctx.reply(`
 <b>⛔ පුද්ගලික ප්‍රවේශ මාදිලිය</b>
 
 <blockquote><i>මෙම සේවාව දැනට Private Mode තුළ ක්‍රියාත්මක වේ.
@@ -333,14 +337,16 @@ async function checkPermissions(ctx) {
 
 <b>📌 අවසර ලබා ගැනීමට සම්බන්ධ වන්න:</b>
 <a href="https://t.me/mataberiyo">Contact Admin</a>
-                `, { parse_mode: 'HTML' });
+                    `, { parse_mode: 'HTML' });
+                } catch (e) {
+                    // User blocked the bot
+                    console.log(`🔇 Cannot send private mode message to user ${userId}: ${e.message}`);
+                }
                 return false;
             }
         }
-        // If private mode disabled, all non-blocked users can use private chat
         return true;
     }
-    
 
 // ----- CHECK GROUP -----
     if (chatType === 'group' || chatType === 'supergroup') {
@@ -602,58 +608,136 @@ async function updateDbConfig() {
 }
 
 // ==================== IMAGE DOWNLOADER ====================
-// Image is downloaded once and saved to disk, not kept in memory
+
 async function downloadImage(url) {
     return new Promise((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http;
-        const tempPath = path.join(__dirname, 'data', 'cached_image.png');
-        
-        if (!fs.existsSync(path.join(__dirname, 'data'))) {
-            fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+        const dataDir = path.join(__dirname, 'data');
+        const tempPath = path.join(dataDir, 'cached_image.png');
+
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
         }
-        
-        client.get(url, (response) => {
+
+        const client = url.startsWith('https://') ? https : http;
+
+        const request = client.get(url, (response) => {
+
+            // Handle redirects
+            if ([301, 302, 307, 308].includes(response.statusCode)) {
+                const redirectUrl = response.headers.location;
+
+                response.resume();
+
+                if (!redirectUrl) {
+                    reject(new Error('Redirect URL not found'));
+                    return;
+                }
+
+                return downloadImage(redirectUrl)
+                    .then(resolve)
+                    .catch(reject);
+            }
+
             if (response.statusCode !== 200) {
-                reject(new Error(`Failed to download image: ${response.statusCode}`));
+                response.resume();
+
+                reject(
+                    new Error(
+                        `Failed to download image: HTTP ${response.statusCode}`
+                    )
+                );
+
                 return;
             }
-            
+
             const fileStream = fs.createWriteStream(tempPath);
+
             response.pipe(fileStream);
-            
+
             fileStream.on('finish', () => {
-                fileStream.close();
-                resolve(tempPath);
+                fileStream.close(() => {
+                    resolve(tempPath);
+                });
             });
-            
+
             fileStream.on('error', (err) => {
+                fileStream.destroy();
                 fs.unlink(tempPath, () => {});
                 reject(err);
             });
-        }).on('error', (err) => {
-            reject(err);
+
+            response.on('error', (err) => {
+                fileStream.destroy();
+                fs.unlink(tempPath, () => {});
+                reject(err);
+            });
         });
+
+        request.setTimeout(30000, () => {
+            request.destroy();
+            reject(new Error('Image download timeout'));
+        });
+
+        request.on('error', reject);
     });
 }
 
+
 async function getCachedImage() {
-    if (!IMAGE_URL) return null;
-    
-    const cachePath = path.join(__dirname, 'data', 'cached_image.png');
-    
+
+    // No URL configured
+    if (!IMAGE_URL) {
+        console.log('⚠️ IMAGE_URL is not configured');
+        return null;
+    }
+
+    // Already loaded during this runtime
+    if (CACHED_IMAGE_PATH && IMAGE_CACHE_CHECKED) {
+        return CACHED_IMAGE_PATH;
+    }
+
+    const dataDir = path.join(__dirname, 'data');
+    const cachePath = path.join(dataDir, 'cached_image.png');
+
     try {
+        await fsPromises.mkdir(dataDir, {
+            recursive: true
+        });
+
+        // Check disk cache
         await fsPromises.access(cachePath);
-        // console.log('✅ Using cached image');
+
+        CACHED_IMAGE_PATH = cachePath;
+        IMAGE_CACHE_CHECKED = true;
+
+        console.log('✅ Using cached image');
+
         return cachePath;
-    } catch {
-        console.log('📥 Downloading image from GitHub...');
+
+    } catch (error) {
+
+        console.log('📥 Downloading image...');
+
         try {
             const downloaded = await downloadImage(IMAGE_URL);
-            console.log('✅ Image downloaded and cached');
+
             CACHED_IMAGE_PATH = downloaded;
+            IMAGE_CACHE_CHECKED = true;
+
+            console.log('✅ Image downloaded and cached');
+
             return downloaded;
+
         } catch (error) {
-            console.error('❌ Failed to download image:', error.message);
+
+            CACHED_IMAGE_PATH = null;
+            IMAGE_CACHE_CHECKED = false;
+
+            console.error(
+                '❌ Failed to download image:',
+                error.message
+            );
+
             return null;
         }
     }
@@ -1488,40 +1572,6 @@ ${progressBar}</code>
 
     return { text, parse_mode: 'HTML', reply_markup: { inline_keyboard: buttons } };
 }
-
-// function formatConfigList(configs, userId) {
-//     if (configs.length === 0) {
-//         return {
-//             text: `
-// <b>📋 සක්‍රීය VPN Configurations නොමැත</b>
-
-// <i>ඔබට දැනට කිසිදු සක්‍රීය VPN Configuration එකක් නොමැත.</i>
-
-// <b>💡 උපදෙස:</b> ආරම්භ කිරීමට <b>🔰 Create Your Own VPN</b> Button එක භාවිතා කරන්න.`,
-//             parse_mode: 'HTML'
-//         };
-//     }
-
-//     let message = `
-// <b>📋 Your Active Configurations</b>
-
-// <i>Here are your current VPN connections:</i>\n\n`;
-    
-//     for (const config of configs) {
-//         const remaining = Math.ceil((config.expiryTime - Date.now()) / (1000 * 60 * 60));
-//         const bar = createProgressBar(remaining, config.duration);
-//         const expiryDate = new Date(config.expiryTime);
-
-//         message += `
-// <blockquote><b>🔹 ${config.duration}h VPN</b>
-// ${bar}
-// <b>ID:</b> <code>${escapeHtml(config.id)}</code>
-// <b>Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
-// <b>⌛ ${remaining}h remaining</b></blockquote>\n`;
-//     }
-    
-//     return { text: message, parse_mode: 'HTML' };
-// }
 
 // ==================== CONFIG PAGINATION ====================
 let configPagination = {};
@@ -3714,8 +3764,9 @@ System is now clean.</blockquote>`,
         }
 
         // ========== LIST USERS ==========
-        if (query.toLowerCase() === 'users' || query.toLowerCase() === 'listusers') {
+        if (query.toLowerCase() === 'users' || query.toLowerCase() === 'listusers' || query.toLowerCase().startsWith('users ') || query.toLowerCase().startsWith('listusers ')) {
             try {
+                // First, read data file (this is fast)
                 const data = await fsPromises.readFile(DATA_FILE, 'utf8');
                 const users = JSON.parse(data);
                 const userKeys = Object.keys(users);
@@ -3723,11 +3774,11 @@ System is now clean.</blockquote>`,
                 if (userKeys.length === 0) {
                     return ctx.answerInlineQuery([
                         {
-                            type: 'article',
-                            id: 'no_users',
-                            title: '📭 No Users Found',
-                            input_message_content: {
-                                message_text: 
+                    type: 'article',
+                    id: 'no_users',
+                    title: '📭 No Users Found',
+                    input_message_content: {
+                        message_text: 
 `<b>📭 No Users Found</b>
 
 <blockquote>No users have used the bot yet.</blockquote>`,
@@ -3738,75 +3789,101 @@ System is now clean.</blockquote>`,
                     ]);
                 }
 
-                // ========== BUILD USER LIST ==========
-                let userList = `<b>📋 Registered Users (${userKeys.length})</b>\n\n`;
-                let userCount = 0;
+                // ========== PAGINATION SETUP ==========
+                const USERS_PER_PAGE = 10;
+                const totalPages = Math.ceil(userKeys.length / USERS_PER_PAGE);
                 
-                // Create a map to store user info
-                const userInfoMap = {};
+                // Get page from query (e.g., "users 2" -> page 1)
+                let page = 0;
                 
-                // First, get all user info from Telegram
-                for (const uid of userKeys) {
-                    try {
-                        const user = await ctx.telegram.getChat(parseInt(uid));
-                        const firstName = user.first_name || 'Unknown';
-                        const lastName = user.last_name || '';
-                        const fullName = `${firstName} ${lastName}`.trim() || 'Unknown User';
-                        const username = user.username ? `@${user.username}` : '';
-                        
-                        userInfoMap[uid] = {
-                            fullName: fullName,
-                            username: username
-                        };
-                    } catch (error) {
-                        // If can't get from Telegram, try to get from Xray config
-                        try {
-                            const xrayData = await readJsonSafe(XRAY_CONFIG, null);
-                            if (xrayData && xrayData.inbounds) {
-                                for (const inbound of xrayData.inbounds) {
-                                    if (inbound.settings && inbound.settings.clients) {
-                                        for (const client of inbound.settings.clients) {
-                                            if (client.email && client.email.includes(`user_${uid}`)) {
-                                                const name = client.email.replace(`user_${uid}_`, '');
-                                                userInfoMap[uid] = {
-                                                    fullName: name || 'Unknown User',
-                                                    username: ''
-                                                };
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (e) {}
-                        
-                        // If still no info, use default
-                        if (!userInfoMap[uid]) {
-                            userInfoMap[uid] = {
-                                fullName: 'Unknown User',
-                                username: ''
-                            };
+                // ✅ FIX: Better parsing for "users 1", "users 2", etc.
+                const queryLower = query.toLowerCase();
+                if (queryLower.startsWith('users ') || queryLower.startsWith('listusers ')) {
+                    const parts = queryLower.split(' ');
+                    if (parts.length > 1) {
+                        const pageNum = parseInt(parts[1]);
+                        if (!isNaN(pageNum) && pageNum >= 0) {
+                            page = pageNum;
+                            // Ensure page is within bounds
+                            if (page >= totalPages) page = totalPages - 1;
+                            if (page < 0) page = 0;
                         }
                     }
                 }
                 
-                // Now build the list with format: ID - FullName (Username) VPNs: X
-                for (const uid of userKeys) {
-                    if (userCount >= 20) {
-                        userList += `\n<i>... and ${userKeys.length - 20} more users</i>`;
-                        break;
+                const startIndex = page * USERS_PER_PAGE;
+                const endIndex = Math.min(startIndex + USERS_PER_PAGE, userKeys.length);
+                const pageUsers = userKeys.slice(startIndex, endIndex);
+                
+                // ========== GET USER INFO FROM XRAY CONFIG (FASTER) ==========
+                const userInfoMap = {};
+                let xrayData = null;
+                try {
+                    xrayData = await readJsonSafe(XRAY_CONFIG, null);
+                } catch (e) {}
+                
+                // Build a map of user IDs to names from Xray config
+                if (xrayData && xrayData.inbounds) {
+                    for (const inbound of xrayData.inbounds) {
+                        if (inbound.settings && inbound.settings.clients) {
+                            for (const client of inbound.settings.clients) {
+                                if (client.email && client.email.includes('user_')) {
+                                    const emailParts = client.email.split('_');
+                                    if (emailParts.length >= 2) {
+                                        const uid = emailParts[1];
+                                        const name = emailParts.slice(2).join('_') || 'Unknown';
+                                        if (!userInfoMap[uid]) {
+                                            userInfoMap[uid] = { fullName: name, username: '' };
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    
+                }
+                
+                // Try to get usernames from Telegram (only for current page users, with timeout)
+                for (const uid of pageUsers) {
+                    if (!userInfoMap[uid]) {
+                        try {
+                            const user = await Promise.race([
+                                ctx.telegram.getChat(parseInt(uid)),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+                            ]);
+                            const firstName = user.first_name || 'Unknown';
+                            const lastName = user.last_name || '';
+                            const fullName = `${firstName} ${lastName}`.trim() || 'Unknown User';
+                            const username = user.username ? `@${user.username}` : '';
+                            
+                            userInfoMap[uid] = {
+                                fullName: fullName,
+                                username: username
+                            };
+                        } catch (error) {
+                            if (!userInfoMap[uid]) {
+                                userInfoMap[uid] = {
+                                    fullName: 'Unknown User',
+                                    username: ''
+                                };
+                            }
+                        }
+                    }
+                }
+                
+                // ========== BUILD USER LIST ==========
+                let userList = `<b>📋 Registered Users (${userKeys.length})</b>\n`;
+                userList += `<i>Page ${page + 1}/${totalPages}</i>\n\n`;
+                
+                let userCount = 0;
+                for (const uid of pageUsers) {
                     const userData = users[uid];
                     const configs = userData.configs || [];
                     const active = configs.filter(c => c.expiryTime > Date.now());
                     
-                    // Get user info from map
                     const info = userInfoMap[uid] || { fullName: 'Unknown User', username: '' };
                     const displayName = info.fullName;
                     const username = info.username;
                     
-                    // Format: ID - FullName (Username) VPNs: X
                     let userLine = `<code>${uid}</code> - ${displayName}`;
                     if (username) {
                         userLine += ` (${username})`;
@@ -3818,41 +3895,81 @@ System is now clean.</blockquote>`,
                 }
                 
                 userList += `\n<i>💡 Use <code>get &lt;user_id&gt;</code> to view configs</i>`;
+                
+                // ========== BUILD INLINE KEYBOARD ==========
+                const inlineKeyboard = [];
+                
+                // Navigation row
+                const navRow = [];
+                if (totalPages > 1) {
+                    if (page > 0) {
+                        navRow.push({ 
+                            text: '◀️ Previous', 
+                            switch_inline_query_current_chat: `users ${page - 1}` 
+                        });
+                    }
+                    
+                    navRow.push({ 
+                        text: `📄 ${page + 1}/${totalPages}`, 
+                        switch_inline_query_current_chat: 'users' 
+                    });
+                    
+                    if (page < totalPages - 1) {
+                        navRow.push({ 
+                            text: 'Next ▶️', 
+                            switch_inline_query_current_chat: `users ${page + 1}` 
+                        });
+                    }
+                }
+                if (navRow.length > 0) {
+                    inlineKeyboard.push(navRow);
+                }
+                
+                // Quick navigation for many pages
+                if (totalPages > 5) {
+                    const quickNav = [];
+                    if (page > 2) quickNav.push({ text: '⏮️ First', switch_inline_query_current_chat: 'users 0' });
+                    if (page < totalPages - 3) quickNav.push({ text: '⏭️ Last', switch_inline_query_current_chat: `users ${totalPages - 1}` });
+                    if (quickNav.length > 0) inlineKeyboard.push(quickNav);
+                }
+                
+                // Action buttons
+                inlineKeyboard.push([
+                    { text: '👤 Get User', switch_inline_query_current_chat: 'get ' },
+                    { text: '👤 Create User', switch_inline_query_current_chat: 'create ' }
+                ]);
+                inlineKeyboard.push([
+                    { text: '📋 List Configs', switch_inline_query_current_chat: 'list' },
+                    { text: '📊 Status', switch_inline_query_current_chat: 'status' }
+                ]);
+                inlineKeyboard.push([
+                    { text: '📈 Stats', switch_inline_query_current_chat: 'stats' },
+                    { text: '🧹 Clean', switch_inline_query_current_chat: 'clean' }
+                ]);
+                inlineKeyboard.push([
+                    { text: '🔙 Back to Menu', switch_inline_query_current_chat: 'help' }
+                ]);
 
+                // ========== ANSWER INLINE QUERY ==========
                 return ctx.answerInlineQuery([
                     {
                         type: 'article',
-                        id: 'user_list',
-                        title: `👥 Users (${userKeys.length})`,
+                        id: `user_list_page_${page}`,
+                        title: `👥 Users (${userKeys.length}) - Page ${page + 1}/${totalPages}`,
                         input_message_content: {
                             message_text: userList,
                             parse_mode: 'HTML',
                             disable_web_page_preview: true
                         },
-                        description: `Total ${userKeys.length} registered users`,
+                        description: `Showing ${startIndex + 1}-${Math.min(endIndex, userKeys.length)} of ${userKeys.length} users`,
                         reply_markup: {
-                            inline_keyboard: [
-                                [
-                                    { text: '👤 Get User', switch_inline_query_current_chat: 'get ' },
-                                    { text: '👤 Create User', switch_inline_query_current_chat: 'create ' }
-                                ],
-                                [
-                                    { text: '📋 List Configs', switch_inline_query_current_chat: 'list' },
-                                    { text: '📊 Status', switch_inline_query_current_chat: 'status' }
-                                ],
-                                [
-                                    { text: '📈 Stats', switch_inline_query_current_chat: 'stats' },
-                                    { text: '🧹 Clean', switch_inline_query_current_chat: 'clean' }
-                                ],
-                                [
-                                    { text: '🔙 Back to Help', switch_inline_query_current_chat: 'help' }
-                                ]
-                            ]
+                            inline_keyboard: inlineKeyboard
                         }
                     }
                 ]);
                 
             } catch (error) {
+                console.error('Error in LIST USERS:', error);
                 return ctx.answerInlineQuery([
                     {
                         type: 'article',
@@ -3860,9 +3977,9 @@ System is now clean.</blockquote>`,
                         title: '❌ Error',
                         input_message_content: {
                             message_text: 
-`<b>❌ Error loading users</b>
+        `<b>❌ Error loading users</b>
 
-<blockquote>${error.message}</blockquote>`,
+        <blockquote>${error.message || 'Unknown error'}</blockquote>`,
                             parse_mode: 'HTML'
                         },
                         description: 'Error occurred'
@@ -6205,18 +6322,18 @@ async function startBot() {
             await getCachedImage();
         }
         
+        console.log('🤖 Bot started!');
+        console.log('🔄 Starting Xray...');
+        await startXray();
+
         bot = new Telegraf(BOT_TOKEN);
         setupBot();
         await ensureDirectories();
         await bot.launch();
         
-        console.log('🤖 Bot started!');
-        console.log('🔄 Starting Xray...');
-        await startXray();
-
         startCleanupScheduler();
         startXrayMonitor();
-        startMemoryMonitor(); // Add memory monitor
+        startMemoryMonitor(); 
         
         console.log('📊 Memory: ' + Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB');
         
