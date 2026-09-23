@@ -9,10 +9,7 @@ const http = require('http');
 
 // ==================== BAN SYSTEM HELPERS ====================
 
-
 // ==================== BAN SYSTEM - INLINE FUNCTIONS ====================
-// මෙය ban_manager.js එකේ තිබුණ functions app.js එකට එකතු කර ඇත
-
 function parseBanDuration(input) {
     if (!input || typeof input !== 'string') return null;
     
@@ -5248,66 +5245,6 @@ ${createLoadingBar(100, '🟩')}
         await editWithImage(ctx, text, [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]]);
     });
     
-
-    // ========== TEXT HANDLER FOR CUSTOM DURATIONS ==========
-    // bot.on('text', async (ctx) => {
-    //     try {
-    //         const text = ctx.message.text;
-    //         const userId = ctx.from.id;
-    //         const user = ctx.from;
-            
-    //         if (userId.toString() !== OWNER_ID) return;
-            
-    //         const num = parseInt(text);
-    //         if (isNaN(num) || num <= 0) return;
-
-    //         // Determine duration type based on pending action
-    //         let duration;
-    //         let action = ownerPendingAction;
-    //         ownerPendingAction = null;
-            
-    //         if (action === 'custom_minutes') {
-    //             duration = Math.ceil(num / 60);
-    //             if (duration < 1) duration = 1;
-    //         } else if (action === 'custom_hours') {
-    //             duration = num;
-    //         } else if (action === 'custom_days') {
-    //             duration = num * 24;
-    //         } else {
-    //             // Auto-detect
-    //             if (num <= 60) {
-    //                 duration = Math.ceil(num / 60);
-    //                 if (duration < 1) duration = 1;
-    //             } else if (num <= 168) {
-    //                 duration = num;
-    //             } else {
-    //                 duration = num * 24;
-    //             }
-    //         }
-            
-    //         const config = await generateVPNConfig(userId, duration);
-    //         await saveVPNConfig(userId, config);
-            
-    //         const messageData = formatVPNMessage(config, user);
-    //         await sendWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
-            
-    //     } catch (error) {
-    //         console.error('Custom duration error:', error);
-    //     }
-    // });
-
-    // // ========== LIST CONFIGS ==========
-    // bot.action('list_configs', async (ctx) => {
-    //     await ctx.answerCbQuery();
-    //     const userId = ctx.from.id;
-    //     const configs = await getActiveConfigs(userId);
-        
-    //     const messageData = formatConfigList(configs, userId);
-    //     const keyboard = configs.length > 0 ? getConfigListKeyboard(configs) : [[{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]];
-        
-    //     await editWithImage(ctx, messageData.text, keyboard);
-    // });
-
     // ========== LIST CONFIGS ==========
     bot.action('list_configs', async (ctx) => {
         await ctx.answerCbQuery();
