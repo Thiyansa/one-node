@@ -8,34 +8,45 @@
         "enabled": false,
         "allowed_users": [],
         "blocked_users": []
-    },
-    "group_settings": {
+      },
+      "group_settings": {
         "enabled": true,
         "allowed_groups": [],
         "blocked_groups": []
-    },
-    "channel_settings": {
-        "enabled": true,
+      },
+      "channel_settings": {
+        "enabled": false,
         "allowed_channels": [],
         "blocked_channels": []
-    },
-    "admin_settings": {
+      },
+      "admin_settings": {
         "enable_button": "enable",
         "disable_button": "disable",
         "require_admin_approval": true,
         "auto_enable_new_groups": false
-    },
-    "user_limits": {
+      },
+      
+      "user_limits": {
         "max_configs_per_user": 5,
         "max_duration_hours": 24,
-        "min_duration_hours": 1
-    },
-    "features": {
+        "min_duration_hours": 1,
+        "daily_create_limit": 2,
+        "daily_reset_hours": 24,
+        "exclude_admin_from_limits": true
+      },
+    
+      "user_bans": {
+        "banned_users": {},
+        "ban_history": []
+      },
+    
+      "features": {
         "allow_qr_codes": true,
         "allow_link_copy": true,
         "show_progress_bars": true,
-        "enable_study_tips": true
-    },
+        "enable_study_tips": true,
+        "enforce_daily_limit": true
+      },
     "chat_controls": {
         "enabled_chats": [],
         "disabled_chats": [],
