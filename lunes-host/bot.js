@@ -7,6 +7,84 @@ const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
 
+// ==================== BAN SYSTEM HELPERS ====================
+
+
+// ==================== BAN SYSTEM - INLINE FUNCTIONS ====================
+// මෙය ban_manager.js එකේ තිබුණ functions app.js එකට එකතු කර ඇත
+
+function parseBanDuration(input) {
+    if (!input || typeof input !== 'string') return null;
+    
+    const str = input.trim().toLowerCase();
+    if (str === 'permanent' || str === 'perm' || str === 'forever' || str === '0') {
+        return { ms: 0, permanent: true, display: 'Permanent' };
+    }
+    
+    const patterns = [
+        { regex: /^(\d+)\s*s(ec(ond)?s?)?$/, unit: 'seconds', ms: 1000 },
+        { regex: /^(\d+)\s*m(in(ute)?s?)?$/, unit: 'minutes', ms: 60 * 1000 },
+        { regex: /^(\d+)\s*h(our|rs?)?$/, unit: 'hours', ms: 60 * 60 * 1000 },
+        { regex: /^(\d+)\s*d(ay|ays?)?$/, unit: 'days', ms: 24 * 60 * 60 * 1000 },
+        { regex: /^(\d+)\s*w(eek|eeks?)?$/, unit: 'weeks', ms: 7 * 24 * 60 * 60 * 1000 },
+        { regex: /^(\d+)\s*mo(nth|nths?)?$/, unit: 'months', ms: 30 * 24 * 60 * 60 * 1000 },
+        { regex: /^(\d+)\s*y(ear|ears?)?$/, unit: 'years', ms: 365 * 24 * 60 * 60 * 1000 }
+    ];
+    
+    for (const pattern of patterns) {
+        const match = str.match(pattern.regex);
+        if (match) {
+            const value = parseInt(match[1]);
+            if (value <= 0) return null;
+            return {
+                ms: value * pattern.ms,
+                permanent: false,
+                display: `${value} ${pattern.unit}`,
+                value,
+                unit: pattern.unit
+            };
+        }
+    }
+    
+    const numMatch = str.match(/^(\d+)$/);
+    if (numMatch) {
+        const value = parseInt(numMatch[1]);
+        if (value <= 0) return null;
+        return {
+            ms: value * 60 * 60 * 1000,
+            permanent: false,
+            display: `${value} hours`,
+            value,
+            unit: 'hours'
+        };
+    }
+    
+    return null;
+}
+
+function formatRemainingTime(ms) {
+    if (ms <= 0) return 'Expired';
+    
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) {
+        const remHours = hours % 24;
+        return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
+    }
+    if (hours > 0) {
+        const remMin = minutes % 60;
+        return remMin > 0 ? `${hours}h ${remMin}m` : `${hours}h`;
+    }
+    if (minutes > 0) {
+        const remSec = seconds % 60;
+        return remSec > 0 ? `${minutes}m ${remSec}s` : `${minutes}m`;
+    }
+    return `${seconds}s`;
+}
+
 // ==================== CONFIGURATION ====================
 let CONFIG = {};
 let BOT_TOKEN, OWNER_ID, DOMAIN, PORT, PATH, IMAGE_URL;
@@ -35,6 +113,7 @@ const MIN_RESTART_INTERVAL = 2000; // 2 seconds minimum
 const MAX_RESTART_QUEUE = 5;
 const MAX_CPU_PERCENT = 13;
 const MAX_RAM_MB = 100;
+
 
 // ===== NEW: Resource Monitor =====
 function checkResourceLimits() {
@@ -85,6 +164,10 @@ async function loadConfig() {
         CHANNEL_SETTINGS = CONFIG.channel_settings || { enabled: true, allowed_channels: [], blocked_channels: [] };
         ADMIN_SETTINGS = CONFIG.admin_settings || { enable_button: 'enable', disable_button: 'disable', require_admin_approval: true, auto_enable_new_groups: false };
         CHAT_CONTROLS = CONFIG.chat_controls || { enabled_chats: [], disabled_chats: [], pending_approvals: [] };
+        // Load user_bans (will be initialized if not present)
+        if (!CONFIG.user_bans) {
+            CONFIG.user_bans = { banned_users: {}, ban_history: [] };
+        }
         
         console.log('✅ Configuration loaded from db.json');
         console.log(`📡 Domain: ${DOMAIN}`);
@@ -1514,6 +1597,347 @@ async function saveUserData(userId, userData) {
     }
 }
 
+
+// ==================== BAN USER MANAGEMENT ====================
+async function banUser(userId, durationInput, reason, bannedBy) {
+    try {
+        const data = await fsPromises.readFile(path.join(__dirname, 'db.json'), 'utf8');
+        const dbData = JSON.parse(data);
+        
+        if (!dbData.user_bans) dbData.user_bans = { banned_users: {}, ban_history: [] };
+        if (!dbData.user_bans.banned_users) dbData.user_bans.banned_users = {};
+        if (!dbData.user_bans.ban_history) dbData.user_bans.ban_history = [];
+        
+        const parsed = parseBanDuration(durationInput);
+        if (!parsed) return { success: false, error: 'Invalid duration format' };
+        
+        const now = Date.now();
+        const banUntil = parsed.permanent ? null : now + parsed.ms;
+        
+        dbData.user_bans.banned_users[userId] = {
+            banned: true,
+            permanent: parsed.permanent,
+            banUntil: banUntil,
+            bannedAt: now,
+            bannedBy: bannedBy,
+            reason: reason || 'No reason provided',
+            durationDisplay: parsed.display,
+            originalInput: durationInput
+        };
+        
+        dbData.user_bans.ban_history.push({
+            action: 'ban',
+            userId: userId,
+            timestamp: now,
+            duration: parsed.display,
+            reason: reason,
+            by: bannedBy
+        });
+        
+        if (dbData.user_bans.ban_history.length > 200) {
+            dbData.user_bans.ban_history = dbData.user_bans.ban_history.slice(-200);
+        }
+        
+        await writeJsonAtomic(path.join(__dirname, 'db.json'), dbData);
+        
+        // Update CONFIG object too
+        CONFIG.user_bans = dbData.user_bans;
+        
+        return {
+            success: true,
+            banUntil,
+            permanent: parsed.permanent,
+            display: parsed.display
+        };
+    } catch (error) {
+        console.error('banUser error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function unbanUser(userId, unbannedBy) {
+    try {
+        const data = await fsPromises.readFile(path.join(__dirname, 'db.json'), 'utf8');
+        const dbData = JSON.parse(data);
+        
+        if (!dbData.user_bans || !dbData.user_bans.banned_users || !dbData.user_bans.banned_users[userId]) {
+            return { success: false, error: 'User is not banned' };
+        }
+        
+        const banInfo = dbData.user_bans.banned_users[userId];
+        delete dbData.user_bans.banned_users[userId];
+        
+        dbData.user_bans.ban_history.push({
+            action: 'unban',
+            userId: userId,
+            timestamp: Date.now(),
+            previousBan: banInfo,
+            by: unbannedBy
+        });
+        
+        await writeJsonAtomic(path.join(__dirname, 'db.json'), dbData);
+        
+        CONFIG.user_bans = dbData.user_bans;
+        
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+async function checkBanStatus(userId) {
+    try {
+        const data = await fsPromises.readFile(path.join(__dirname, 'db.json'), 'utf8');
+        const dbData = JSON.parse(data);
+        
+        if (!dbData.user_bans || !dbData.user_bans.banned_users) {
+            return { banned: false };
+        }
+        
+        const ban = dbData.user_bans.banned_users[userId];
+        if (!ban || !ban.banned) return { banned: false };
+        
+        if (ban.permanent) {
+            return {
+                banned: true,
+                permanent: true,
+                reason: ban.reason,
+                bannedBy: ban.bannedBy,
+                bannedAt: ban.bannedAt
+            };
+        }
+        
+        if (Date.now() >= ban.banUntil) {
+            delete dbData.user_bans.banned_users[userId];
+            dbData.user_bans.ban_history.push({
+                action: 'auto_unban',
+                userId: userId,
+                timestamp: Date.now(),
+                reason: 'Ban expired'
+            });
+            await writeJsonAtomic(path.join(__dirname, 'db.json'), dbData);
+            CONFIG.user_bans = dbData.user_bans;
+            return { banned: false, expired: true };
+        }
+        
+        const remaining = ban.banUntil - Date.now();
+        
+        return {
+            banned: true,
+            permanent: false,
+            banUntil: ban.banUntil,
+            remaining,
+            remainingDisplay: formatRemainingTime(remaining),
+            reason: ban.reason,
+            bannedBy: ban.bannedBy,
+            bannedAt: ban.bannedAt
+        };
+    } catch (error) {
+        return { banned: false, error: error.message };
+    }
+}
+
+async function getBannedUsers() {
+    try {
+        const data = await fsPromises.readFile(path.join(__dirname, 'db.json'), 'utf8');
+        const dbData = JSON.parse(data);
+        if (!dbData.user_bans || !dbData.user_bans.banned_users) return {};
+        return dbData.user_bans.banned_users;
+    } catch {
+        return {};
+    }
+}
+
+async function getBanHistory(limit = 20) {
+    try {
+        const data = await fsPromises.readFile(path.join(__dirname, 'db.json'), 'utf8');
+        const dbData = JSON.parse(data);
+        if (!dbData.user_bans || !dbData.user_bans.ban_history) return [];
+        return dbData.user_bans.ban_history.slice(-limit).reverse();
+    } catch {
+        return [];
+    }
+}
+
+// ==================== DAILY CREATE LIMIT TRACKER ====================
+async function getDailyCreateCount(userId) {
+    try {
+        const userData = await getUserData(userId);
+        if (!userData) return { count: 0, resetAt: null, firstCreateAt: null };
+        
+        const now = Date.now();
+        const resetHours = CONFIG.user_limits?.daily_reset_hours || 24;
+        const resetMs = resetHours * 60 * 60 * 1000;
+        
+        if (!userData.dailyTracker) {
+            userData.dailyTracker = {
+                count: 0,
+                firstCreateAt: null,
+                lastResetAt: now
+            };
+            await saveUserData(userId, userData);
+            return { count: 0, resetAt: null, firstCreateAt: null };
+        }
+        
+        const tracker = userData.dailyTracker;
+        
+        if (tracker.firstCreateAt && (now - tracker.firstCreateAt) >= resetMs) {
+            tracker.count = 0;
+            tracker.firstCreateAt = null;
+            tracker.lastResetAt = now;
+            await saveUserData(userId, userData);
+            return { count: 0, resetAt: null, firstCreateAt: null };
+        }
+        
+        let resetAt = null;
+        if (tracker.firstCreateAt) {
+            resetAt = tracker.firstCreateAt + resetMs;
+        }
+        
+        return {
+            count: tracker.count || 0,
+            resetAt: resetAt,
+            firstCreateAt: tracker.firstCreateAt,
+            remainingMs: resetAt ? Math.max(0, resetAt - now) : 0
+        };
+    } catch (error) {
+        console.error('getDailyCreateCount error:', error);
+        return { count: 0, resetAt: null, firstCreateAt: null };
+    }
+}
+
+async function checkDailyLimit(userId) {
+    const isOwner = userId.toString() === OWNER_ID;
+    const excludeAdmin = CONFIG.user_limits?.exclude_admin_from_limits !== false;
+    
+    if (isOwner && excludeAdmin) {
+        return { allowed: true, isAdmin: true };
+    }
+    
+    if (CONFIG.features?.enforce_daily_limit === false) {
+        return { allowed: true };
+    }
+    
+    const banStatus = await checkBanStatus(userId);
+    if (banStatus.banned) {
+        return {
+            allowed: false,
+            type: 'banned',
+            banInfo: banStatus
+        };
+    }
+    
+    const dailyLimit = CONFIG.user_limits?.daily_create_limit || 2;
+    const dailyInfo = await getDailyCreateCount(userId);
+    
+    if (dailyInfo.count >= dailyLimit) {
+        return {
+            allowed: false,
+            type: 'daily_limit',
+            count: dailyInfo.count,
+            limit: dailyLimit,
+            resetAt: dailyInfo.resetAt,
+            remainingMs: dailyInfo.remainingMs
+        };
+    }
+    
+    return {
+        allowed: true,
+        count: dailyInfo.count,
+        limit: dailyLimit,
+        remaining: dailyLimit - dailyInfo.count
+    };
+}
+
+async function incrementDailyCounter(userId) {
+    try {
+        const userData = await getUserData(userId) || { configs: [] };
+        
+        if (!userData.dailyTracker) {
+            userData.dailyTracker = {
+                count: 0,
+                firstCreateAt: null,
+                lastResetAt: Date.now()
+            };
+        }
+        
+        const now = Date.now();
+        const resetHours = CONFIG.user_limits?.daily_reset_hours || 24;
+        const resetMs = resetHours * 60 * 60 * 1000;
+        
+        if (userData.dailyTracker.firstCreateAt && 
+            (now - userData.dailyTracker.firstCreateAt) >= resetMs) {
+            userData.dailyTracker.count = 0;
+            userData.dailyTracker.firstCreateAt = null;
+        }
+        
+        if (!userData.dailyTracker.firstCreateAt) {
+            userData.dailyTracker.firstCreateAt = now;
+        }
+        
+        userData.dailyTracker.count = (userData.dailyTracker.count || 0) + 1;
+        userData.dailyTracker.lastCreateAt = now;
+        
+        await saveUserData(userId, userData);
+        
+        return {
+            count: userData.dailyTracker.count,
+            firstCreateAt: userData.dailyTracker.firstCreateAt
+        };
+    } catch (error) {
+        console.error('incrementDailyCounter error:', error);
+        return null;
+    }
+}
+
+function formatLimitMessage(limitInfo) {
+    if (limitInfo.type === 'banned') {
+        const ban = limitInfo.banInfo;
+        let text = `<b>🚫 ඔබව Ban කර ඇත</b>\n\n`;
+        
+        if (ban.permanent) {
+            text += `<blockquote><b>⏱ කාලය:</b> <code>ස්ථිර (Permanent)</code>\n`;
+        } else {
+            const resetDate = new Date(ban.banUntil);
+            text += `<blockquote><b>⏱ කාලය:</b> <code>${ban.remainingDisplay}</code>\n`;
+            text += `<b>📅 නිදහස් වන වේලාව:</b> <code>${resetDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>\n`;
+        }
+        
+        text += `<b>📝 හේතුව:</b> <i>${escapeHtml(ban.reason)}</i>\n`;
+        text += `<b>👮 Ban කළේ:</b> Admin</blockquote>\n\n`;
+        text += `<i>💬 වැඩි විස්තර සඳහා Admin සම්බන්ධ කරගන්න:</i>\n`;
+        text += `<a href="https://t.me/mataberiyo">📩 Contact Admin</a>`;
+        
+        return text;
+    }
+    
+    if (limitInfo.type === 'daily_limit') {
+        const resetDate = new Date(limitInfo.resetAt);
+        const remaining = limitInfo.remainingMs;
+        
+        const hours = Math.floor(remaining / (1000 * 60 * 60));
+        const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+        
+        let countdownStr = '';
+        if (hours > 0) countdownStr += `${hours}h `;
+        if (minutes > 0) countdownStr += `${minutes}m `;
+        countdownStr += `${seconds}s`;
+        
+        let text = `<b>⏳ දෛනික Limit එක ඉවරයි</b>\n\n`;
+        text += `<blockquote><b>📊 ඔබ අද Create කළේ:</b> <code>${limitInfo.count}/${limitInfo.limit}</code>\n`;
+        text += `<b>⏰ නැවත Create කළ හැක්කේ:</b> <code>${resetDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>\n`;
+        text += `<b>⌛ ඉතිරි කාලය:</b> <code>${countdownStr}</code></blockquote>\n\n`;
+        text += `<i>💡 දවසකට උපරිම VPN <b>${limitInfo.limit}</b>ක් පමණි.</i>\n`;
+        text += `<i>🗑️ Delete කළත් මෙම limit එක නැවත ලැබෙන්නේ නැත.</i>\n\n`;
+        text += `<blockquote>⚡ <b>Limit එක ඉවර වන තෙක් රැඳී සිටින්න.</b></blockquote>`;
+        
+        return text;
+    }
+    
+    return `<b>❌ Limit Error</b>`;
+}
+
 // ==================== LOADING BAR FUNCTIONS ====================
 function createLoadingBar(percentage, emoji = '🟩') {
     const filled = Math.round(percentage / 10);
@@ -1572,6 +1996,40 @@ ${progressBar}</code>
 
     return { text, parse_mode: 'HTML', reply_markup: { inline_keyboard: buttons } };
 }
+
+// function formatConfigList(configs, userId) {
+//     if (configs.length === 0) {
+//         return {
+//             text: `
+// <b>📋 සක්‍රීය VPN Configurations නොමැත</b>
+
+// <i>ඔබට දැනට කිසිදු සක්‍රීය VPN Configuration එකක් නොමැත.</i>
+
+// <b>💡 උපදෙස:</b> ආරම්භ කිරීමට <b>🔰 Create Your Own VPN</b> Button එක භාවිතා කරන්න.`,
+//             parse_mode: 'HTML'
+//         };
+//     }
+
+//     let message = `
+// <b>📋 Your Active Configurations</b>
+
+// <i>Here are your current VPN connections:</i>\n\n`;
+    
+//     for (const config of configs) {
+//         const remaining = Math.ceil((config.expiryTime - Date.now()) / (1000 * 60 * 60));
+//         const bar = createProgressBar(remaining, config.duration);
+//         const expiryDate = new Date(config.expiryTime);
+
+//         message += `
+// <blockquote><b>🔹 ${config.duration}h VPN</b>
+// ${bar}
+// <b>ID:</b> <code>${escapeHtml(config.id)}</code>
+// <b>Expires (SL):</b> <code>${expiryDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>
+// <b>⌛ ${remaining}h remaining</b></blockquote>\n`;
+//     }
+    
+//     return { text: message, parse_mode: 'HTML' };
+// }
 
 // ==================== CONFIG PAGINATION ====================
 let configPagination = {};
@@ -2178,6 +2636,10 @@ function getAdminKeyboard() {
         [
             { text: '📢 Channel Settings', callback_data: 'admin_channel_settings' },
             { text: '👤 User Management', callback_data: 'admin_user_management' }
+        ],
+        [
+            { text: '🚫 Ban Management', callback_data: 'admin_ban_menu' },
+            { text: '⚙️ Limits Config', callback_data: 'admin_limits_menu' }
         ],
         [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
     ];
@@ -4531,12 +4993,37 @@ bot.command('inlinestatus', async (ctx) => {
         await ctx.replyWithHTML(statusText);
     });
 
-    // ========== CREATE VPN ==========
+    // ========== CREATE VPN - WITH LIMIT CHECK ==========
     bot.action('create_vpn', async (ctx) => {
         await ctx.answerCbQuery();
         const userId = ctx.from.id;
         const isOwner = userId.toString() === OWNER_ID;
         
+        // ===== 1. BAN CHECK =====
+        const banStatus = await checkBanStatus(userId);
+        if (banStatus.banned && !isOwner) {
+            const banText = formatLimitMessage({ 
+                type: 'banned', 
+                banInfo: banStatus 
+            });
+            await editWithImage(ctx, banText, [
+                [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
+            ]);
+            return;
+        }
+        
+        // ===== 2. DAILY LIMIT CHECK =====
+        const limitCheck = await checkDailyLimit(userId);
+        if (!limitCheck.allowed && !isOwner) {
+            const limitText = formatLimitMessage(limitCheck);
+            await editWithImage(ctx, limitText, [
+                [{ text: '🔄 Refresh', callback_data: 'create_vpn' }],
+                [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
+            ]);
+            return;
+        }
+        
+        // ===== 3. ACTIVE CONFIG LIMIT CHECK =====
         if (!isOwner) {
             const activeConfigs = await getActiveConfigs(userId);
             const maxConfigs = CONFIG.user_limits?.max_configs_per_user || 5;
@@ -4546,10 +5033,31 @@ bot.command('inlinestatus', async (ctx) => {
             }
         }
         
+        // ===== 4. SHOW DURATION SELECTION =====
+        const dailyInfo = await getDailyCreateCount(userId);
+        const dailyLimit = CONFIG.user_limits?.daily_create_limit || 2;
+        const usedToday = dailyInfo.count;
+        const remainingToday = Math.max(0, dailyLimit - usedToday);
+        
+        let resetInfo = '';
+        if (dailyInfo.resetAt && remainingToday < dailyLimit) {
+            const resetDate = new Date(dailyInfo.resetAt);
+            const remMs = dailyInfo.resetAt - Date.now();
+            const hours = Math.floor(remMs / (1000 * 60 * 60));
+            const minutes = Math.floor((remMs % (1000 * 60 * 60)) / (1000 * 60));
+            
+            resetInfo = `\n⏰ <b>Limit එක නැවත ලැබෙනවා:</b> <code>${hours}h ${minutes}m</code> කින්\n📅 <b>වේලාව:</b> <code>${resetDate.toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>`;
+        }
+        
+        let limitDisplay = '';
+        if (!isOwner) {
+            limitDisplay = `\n\n<blockquote>📊 <b>අද Create කළේ:</b> <code>${usedToday}/${dailyLimit}</code>\n🎫 <b>ඉතිරි:</b> <code>${remainingToday}</code>${resetInfo}</blockquote>`;
+        }
+        
         const text = `
 <b>⏱ Select Duration</b>
 
-VPN එක සැකසීමට අවශ්‍ය කාලය තොරන්න.${isOwner ? '\n⚡ <b>Admin Options:</b>\nYou have custom duration options available!' : ''}
+VPN එක සැකසීමට අවශ්‍ය කාලය තොරන්න.${isOwner ? '\n⚡ <b>Admin Options:</b>\nYou have custom duration options available!' : ''}${limitDisplay}
 
 📌 Available කාල පරාසයන් පහත පරිදි වේ.
         `;
@@ -4564,6 +5072,30 @@ VPN එක සැකසීමට අවශ්‍ය කාලය තොරන්
         const userId = ctx.from.id;
         const user = ctx.from;
         const isOwner = userId.toString() === OWNER_ID;
+        
+        // ===== BAN CHECK (SECOND LAYER) =====
+        const banStatus = await checkBanStatus(userId);
+        if (banStatus.banned && !isOwner) {
+            const banText = formatLimitMessage({ 
+                type: 'banned', 
+                banInfo: banStatus 
+            });
+            await editWithImage(ctx, banText, [
+                [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
+            ]);
+            return;
+        }
+        
+        // ===== DAILY LIMIT CHECK (SECOND LAYER) =====
+        const limitCheck = await checkDailyLimit(userId);
+        if (!limitCheck.allowed && !isOwner) {
+            const limitText = formatLimitMessage(limitCheck);
+            await editWithImage(ctx, limitText, [
+                [{ text: '🔄 Refresh', callback_data: 'create_vpn' }],
+                [{ text: '🔙 Back to Menu', callback_data: 'back_to_menu' }]
+            ]);
+            return;
+        }
         
         if (!isOwner) {
             const activeConfigs = await getActiveConfigs(userId);
@@ -4634,6 +5166,12 @@ ${createLoadingBar(100, '🟩')}
             if (!saved) {
                 throw new Error(`Failed to save config: ${lastError?.message || 'Unknown error'}`);
             }
+
+            // Increment daily counter for non-owners
+            if (!isOwner) {
+                await incrementDailyCounter(userId);
+            }
+            
             
             const messageData = formatVPNMessage(config, user);
             await editWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
@@ -4712,51 +5250,51 @@ ${createLoadingBar(100, '🟩')}
     
 
     // ========== TEXT HANDLER FOR CUSTOM DURATIONS ==========
-    bot.on('text', async (ctx) => {
-        try {
-            const text = ctx.message.text;
-            const userId = ctx.from.id;
-            const user = ctx.from;
+    // bot.on('text', async (ctx) => {
+    //     try {
+    //         const text = ctx.message.text;
+    //         const userId = ctx.from.id;
+    //         const user = ctx.from;
             
-            if (userId.toString() !== OWNER_ID) return;
+    //         if (userId.toString() !== OWNER_ID) return;
             
-            const num = parseInt(text);
-            if (isNaN(num) || num <= 0) return;
+    //         const num = parseInt(text);
+    //         if (isNaN(num) || num <= 0) return;
 
-            // Determine duration type based on pending action
-            let duration;
-            let action = ownerPendingAction;
-            ownerPendingAction = null;
+    //         // Determine duration type based on pending action
+    //         let duration;
+    //         let action = ownerPendingAction;
+    //         ownerPendingAction = null;
             
-            if (action === 'custom_minutes') {
-                duration = Math.ceil(num / 60);
-                if (duration < 1) duration = 1;
-            } else if (action === 'custom_hours') {
-                duration = num;
-            } else if (action === 'custom_days') {
-                duration = num * 24;
-            } else {
-                // Auto-detect
-                if (num <= 60) {
-                    duration = Math.ceil(num / 60);
-                    if (duration < 1) duration = 1;
-                } else if (num <= 168) {
-                    duration = num;
-                } else {
-                    duration = num * 24;
-                }
-            }
+    //         if (action === 'custom_minutes') {
+    //             duration = Math.ceil(num / 60);
+    //             if (duration < 1) duration = 1;
+    //         } else if (action === 'custom_hours') {
+    //             duration = num;
+    //         } else if (action === 'custom_days') {
+    //             duration = num * 24;
+    //         } else {
+    //             // Auto-detect
+    //             if (num <= 60) {
+    //                 duration = Math.ceil(num / 60);
+    //                 if (duration < 1) duration = 1;
+    //             } else if (num <= 168) {
+    //                 duration = num;
+    //             } else {
+    //                 duration = num * 24;
+    //             }
+    //         }
             
-            const config = await generateVPNConfig(userId, duration);
-            await saveVPNConfig(userId, config);
+    //         const config = await generateVPNConfig(userId, duration);
+    //         await saveVPNConfig(userId, config);
             
-            const messageData = formatVPNMessage(config, user);
-            await sendWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
+    //         const messageData = formatVPNMessage(config, user);
+    //         await sendWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
             
-        } catch (error) {
-            console.error('Custom duration error:', error);
-        }
-    });
+    //     } catch (error) {
+    //         console.error('Custom duration error:', error);
+    //     }
+    // });
 
     // // ========== LIST CONFIGS ==========
     // bot.action('list_configs', async (ctx) => {
@@ -5043,6 +5581,352 @@ ${createLoadingBar(100, '🟩')}
 <code>♻️ අවශ්‍ය ක්‍රියාව තෝරා පද්ධතිය කළමනාකරණය කරන්න.</code>
         `;
         await editWithImage(ctx, text, getAdminKeyboard());
+    });
+
+
+    
+    // ========== ADMIN: BAN MANAGEMENT MENU ==========
+    bot.action('admin_ban_menu', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        const banned = await getBannedUsers();
+        const activeBans = Object.entries(banned).filter(([uid, info]) => {
+            if (!info.banned) return false;
+            if (info.permanent) return true;
+            return info.banUntil > Date.now();
+        });
+        
+        const history = await getBanHistory(1000);
+        
+        const text = `
+<b>🚫 Ban Management</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>ක්‍රියාකාරී Bans:</b> <code>${activeBans.length}</code>
+<b>මුළු Ban History:</b> <code>${history.length}</code>
+━━━━━━━━━━━━━━━━━━━━━━
+
+<blockquote><b>📌 මෙය ක්‍රියා කරන ආකාරය:</b>
+• User කෙනෙක්ට VPN Create කිරීම block කළ හැක
+• කාල සීමාවන්: <code>30s, 5m, 2h, 1d, 1w, 1mo, 1y, permanent</code>
+• හේතුවක් අනිවාර්යයෙන් දිය යුතුයි
+• User ට තමන් Ban වුන හේතුව හා නිදහස් වන වේලාව පෙන්වයි
+• Ban කාලය ඉවර වුනාම automatically unban වේ</blockquote>
+
+<i>පහත options වලින් එකක් තෝරන්න:</i>
+        `;
+        
+        const buttons = [
+            [{ text: '➕ නව Ban එකක් දාන්න', callback_data: 'admin_ban_add' }],
+            [{ text: '✅ Ban එකක් ඉවත් කරන්න', callback_data: 'admin_ban_remove' }],
+            [{ text: '📋 සියලු Bans බලන්න', callback_data: 'admin_ban_list' }],
+            [{ text: '📜 Ban History', callback_data: 'admin_ban_history' }],
+            [{ text: '🔙 Back to Admin', callback_data: 'admin_panel' }]
+        ];
+        
+        await editWithImage(ctx, text, buttons);
+    });
+
+    // ========== BAN ADD - STEP 1: User ID ==========
+    bot.action('admin_ban_add', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        ownerPendingAction = 'ban_user_step1';
+        
+        await editWithImage(ctx, `
+<b>➕ නව Ban එකක් - පියවර 1/3</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>📝 පියවර 1:</b> Ban කරන්න ඕන user ගේ ID එක එවන්න.
+<code>උදාහරණය: 123456789</code></blockquote>
+
+<i>💡 User ගේ ID එක ඔබට දැනගන්න බැරි නම්, <code>/status</code> command එකෙන් හෝ User Management → View All Users වලින් බලන්න.</i>
+        `, [[{ text: '❌ Cancel', callback_data: 'admin_ban_menu' }]]);
+    });
+
+    // ========== BAN LIST ==========
+    bot.action('admin_ban_list', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        const banned = await getBannedUsers();
+        const entries = Object.entries(banned);
+        
+        if (entries.length === 0) {
+            await editWithImage(ctx, `
+<b>📋 Active Bans</b>
+
+<i>දැනට කිසිදු active ban එකක් නැහැ.</i>
+            `, [[{ text: '🔙 Back', callback_data: 'admin_ban_menu' }]]);
+            return;
+        }
+        
+        let text = `<b>📋 Active Bans</b>\n\n`;
+        let hasActive = false;
+        
+        for (const [uid, info] of entries) {
+            if (!info.banned) continue;
+            if (!info.permanent && info.banUntil <= Date.now()) continue;
+            
+            hasActive = true;
+            const status = info.permanent ? '🔴 Permanent' : '🟡 Temporary';
+            const remaining = info.permanent ? '∞' : formatRemainingTime(info.banUntil - Date.now());
+            
+            text += `<blockquote>`;
+            text += `<b>👤 User ID:</b> <code>${escapeHtml(uid)}</code>\n`;
+            text += `<b>📊 Status:</b> ${status}\n`;
+            text += `<b>⏱ ඉතිරි:</b> <code>${remaining}</code>\n`;
+            text += `<b>📝 හේතුව:</b> <i>${escapeHtml(info.reason)}</i>\n`;
+            text += `<b>📅 Ban කළේ:</b> <code>${new Date(info.bannedAt).toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>`;
+            text += `</blockquote>\n`;
+        }
+        
+        if (!hasActive) {
+            text += `<i>දැනට කිසිදු active ban එකක් නැහැ.</i>`;
+        }
+        
+        await editWithImage(ctx, text, [
+            [{ text: '🔄 Refresh', callback_data: 'admin_ban_list' }],
+            [{ text: '🔙 Back', callback_data: 'admin_ban_menu' }]
+        ]);
+    });
+
+    // ========== BAN REMOVE - LIST ==========
+    bot.action('admin_ban_remove', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        const banned = await getBannedUsers();
+        const activeEntries = Object.entries(banned).filter(([uid, info]) => {
+            if (!info.banned) return false;
+            if (info.permanent) return true;
+            return info.banUntil > Date.now();
+        });
+        
+        if (activeEntries.length === 0) {
+            await ctx.answerCbQuery('No active bans!');
+            return;
+        }
+        
+        const buttons = activeEntries.map(([uid, info]) => {
+            return [{ text: `✅ Unban ${uid}`, callback_data: `admin_unban_${uid}` }];
+        });
+        buttons.push([{ text: '🔙 Back', callback_data: 'admin_ban_menu' }]);
+        
+        await editWithImage(ctx, `
+<b>✅ Unban User</b>
+
+<blockquote>Unban කරන්න ඕන user එක තෝරන්න:</blockquote>
+        `, buttons);
+    });
+
+    // ========== UNBAN HANDLER ==========
+    bot.action(/^admin_unban_(\d+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        const targetUid = ctx.match[1];
+        const result = await unbanUser(targetUid, userId);
+        
+        if (result.success) {
+            await editWithImage(ctx, `
+<b>✅ User Unbanned</b>
+
+<blockquote><b>👤 User ID:</b> <code>${escapeHtml(targetUid)}</code>
+<b>📊 Status:</b> 🟢 Active
+
+User ට නැවත VPN create කිරීමට අවසර ලැබී ඇත.</blockquote>
+            `, [
+                [{ text: '📋 Ban List', callback_data: 'admin_ban_list' }],
+                [{ text: '🔙 Back', callback_data: 'admin_ban_menu' }]
+            ]);
+        } else {
+            await ctx.answerCbQuery(`❌ ${result.error}`);
+        }
+    });
+
+    // ========== BAN HISTORY ==========
+    bot.action('admin_ban_history', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        const history = await getBanHistory(15);
+        
+        if (history.length === 0) {
+            await editWithImage(ctx, `
+<b>📜 Ban History</b>
+
+<i>History එකක් නැහැ.</i>
+            `, [[{ text: '🔙 Back', callback_data: 'admin_ban_menu' }]]);
+            return;
+        }
+        
+        let text = `<b>📜 Ban History (Last ${history.length})</b>\n\n`;
+        
+        for (const entry of history) {
+            const action = entry.action === 'ban' ? '🚫 Ban' : 
+                           entry.action === 'unban' ? '✅ Unban' : '🔄 Auto-Unban';
+            const date = new Date(entry.timestamp).toLocaleString('en-US', { 
+                timeZone: 'Asia/Colombo',
+                hour12: false,
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            text += `<blockquote>`;
+            text += `<b>${action}</b> - <code>${escapeHtml(entry.userId)}</code>\n`;
+            text += `<b>📅 කාලය:</b> <code>${date}</code>\n`;
+            if (entry.duration) text += `<b>⏱ කාලය:</b> <code>${escapeHtml(entry.duration)}</code>\n`;
+            if (entry.reason) text += `<b>📝 හේතුව:</b> <i>${escapeHtml(entry.reason)}</i>\n`;
+            text += `</blockquote>\n`;
+        }
+        
+        await editWithImage(ctx, text, [
+            [{ text: '🔙 Back', callback_data: 'admin_ban_menu' }]
+        ]);
+    });
+
+    // ========== LIMITS CONFIG MENU ==========
+    bot.action('admin_limits_menu', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = ctx.from.id;
+        if (userId.toString() !== OWNER_ID) return;
+        
+        const limits = CONFIG.user_limits || {};
+        
+        const text = `
+<b>⚙️ Limits Configuration</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>📊 Current Settings:</b>
+<blockquote>• දෛනික Create Limit: <code>${limits.daily_create_limit || 2}</code> configs
+• Limit Reset වන කාලය: <code>${limits.daily_reset_hours || 24}h</code>
+• උපරිම Active Configs: <code>${limits.max_configs_per_user || 5}</code>
+• උපරිම Duration: <code>${limits.max_duration_hours || 24}h</code>
+• Admin Limit නැතිද: <code>${limits.exclude_admin_from_limits !== false ? 'ඔව්' : 'නැහැ'}</code></blockquote>
+━━━━━━━━━━━━━━━━━━━━━━
+
+<i>වෙනස් කරන්න ඕන setting එක තෝරන්න:</i>
+        `;
+        
+        const buttons = [
+            [{ text: `📅 Daily Limit: ${limits.daily_create_limit || 2}`, callback_data: 'admin_set_daily_limit' }],
+            [{ text: `⏰ Reset Hours: ${limits.daily_reset_hours || 24}h`, callback_data: 'admin_set_reset_hours' }],
+            [{ text: `🔢 Max Active Configs: ${limits.max_configs_per_user || 5}`, callback_data: 'admin_set_max_configs' }],
+            [{ text: `⏱ Max Duration: ${limits.max_duration_hours || 24}h`, callback_data: 'admin_set_max_duration' }],
+            [{ text: `👑 Admin Exclude: ${limits.exclude_admin_from_limits !== false ? '✅' : '❌'}`, callback_data: 'admin_toggle_admin_exclude' }],
+            [{ text: '🔙 Back to Admin', callback_data: 'admin_panel' }]
+        ];
+        
+        await editWithImage(ctx, text, buttons);
+    });
+
+    // ========== LIMIT SETTING INPUTS ==========
+    bot.action('admin_set_daily_limit', async (ctx) => {
+        await ctx.answerCbQuery();
+        if (ctx.from.id.toString() !== OWNER_ID) return;
+        ownerPendingAction = 'set_daily_limit';
+        await editWithImage(ctx, `
+<b>📅 දෛනික Limit වෙනස් කරන්න</b>
+
+<blockquote>දවසකට user කෙනෙක්ට create කළ හැකි VPN ගණන ඇතුළත් කරන්න:
+<code>උදාහරණය: 1, 2, 3, 5, 10</code></blockquote>
+
+<b>💡 දැනට:</b> <code>${CONFIG.user_limits?.daily_create_limit || 2}</code>
+        `, [[{ text: '❌ Cancel', callback_data: 'admin_limits_menu' }]]);
+    });
+
+    bot.action('admin_set_reset_hours', async (ctx) => {
+        await ctx.answerCbQuery();
+        if (ctx.from.id.toString() !== OWNER_ID) return;
+        ownerPendingAction = 'set_reset_hours';
+        await editWithImage(ctx, `
+<b>⏰ Reset Hours වෙනස් කරන්න</b>
+
+<blockquote>Limit එක reset වන පැය ගණන ඇතුළත් කරන්න:
+<code>උදාහරණය: 24 (දවසකට වරක්)</code>
+<code>උදාහරණය: 12 (පැය 12කට වරක්)</code>
+<code>උදාහරණය: 1 (පැයකට වරක්)</code></blockquote>
+
+<b>💡 දැනට:</b> <code>${CONFIG.user_limits?.daily_reset_hours || 24}h</code>
+        `, [[{ text: '❌ Cancel', callback_data: 'admin_limits_menu' }]]);
+    });
+
+    bot.action('admin_set_max_configs', async (ctx) => {
+        await ctx.answerCbQuery();
+        if (ctx.from.id.toString() !== OWNER_ID) return;
+        ownerPendingAction = 'set_max_configs';
+        await editWithImage(ctx, `
+<b>🔢 Max Active Configs වෙනස් කරන්න</b>
+
+<blockquote>User කෙනෙක්ට එකවර තිබිය හැකි active VPN ගණන:
+<code>උදාහරණය: 2, 3, 5, 10</code></blockquote>
+
+<b>💡 දැනට:</b> <code>${CONFIG.user_limits?.max_configs_per_user || 5}</code>
+        `, [[{ text: '❌ Cancel', callback_data: 'admin_limits_menu' }]]);
+    });
+
+    bot.action('admin_set_max_duration', async (ctx) => {
+        await ctx.answerCbQuery();
+        if (ctx.from.id.toString() !== OWNER_ID) return;
+        ownerPendingAction = 'set_max_duration';
+        await editWithImage(ctx, `
+<b>⏱ Max Duration වෙනස් කරන්න</b>
+
+<blockquote>VPN එකක උපරිම කාලය පැය වලින්:
+<code>උදාහරණය: 24 (දවසක්)</code>
+<code>උදාහරණය: 72 (දවස් 3)</code>
+<code>උදාහරණය: 168 (දවස් 7)</code></blockquote>
+
+<b>💡 දැනට:</b> <code>${CONFIG.user_limits?.max_duration_hours || 24}h</code>
+        `, [[{ text: '❌ Cancel', callback_data: 'admin_limits_menu' }]]);
+    });
+
+    bot.action('admin_toggle_admin_exclude', async (ctx) => {
+        await ctx.answerCbQuery();
+        if (ctx.from.id.toString() !== OWNER_ID) return;
+        
+        if (!CONFIG.user_limits) CONFIG.user_limits = {};
+        CONFIG.user_limits.exclude_admin_from_limits = !CONFIG.user_limits.exclude_admin_from_limits;
+        await updateDbConfig();
+        
+        const status = CONFIG.user_limits.exclude_admin_from_limits ? 'enabled' : 'disabled';
+        await ctx.answerCbQuery(`Admin exclude ${status}!`);
+        
+        const limits = CONFIG.user_limits;
+        const text = `
+<b>⚙️ Limits Configuration</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>📊 Current Settings:</b>
+<blockquote>• දෛනික Create Limit: <code>${limits.daily_create_limit || 2}</code> configs
+• Limit Reset වන කාලය: <code>${limits.daily_reset_hours || 24}h</code>
+• උපරිම Active Configs: <code>${limits.max_configs_per_user || 5}</code>
+• උපරිම Duration: <code>${limits.max_duration_hours || 24}h</code>
+• Admin Limit නැතිද: <code>${limits.exclude_admin_from_limits !== false ? 'ඔව්' : 'නැහැ'}</code></blockquote>
+━━━━━━━━━━━━━━━━━━━━━━
+        `;
+        
+        const buttons = [
+            [{ text: `📅 Daily Limit: ${limits.daily_create_limit || 2}`, callback_data: 'admin_set_daily_limit' }],
+            [{ text: `⏰ Reset Hours: ${limits.daily_reset_hours || 24}h`, callback_data: 'admin_set_reset_hours' }],
+            [{ text: `🔢 Max Active Configs: ${limits.max_configs_per_user || 5}`, callback_data: 'admin_set_max_configs' }],
+            [{ text: `⏱ Max Duration: ${limits.max_duration_hours || 24}h`, callback_data: 'admin_set_max_duration' }],
+            [{ text: `👑 Admin Exclude: ${limits.exclude_admin_from_limits !== false ? '✅' : '❌'}`, callback_data: 'admin_toggle_admin_exclude' }],
+            [{ text: '🔙 Back to Admin', callback_data: 'admin_panel' }]
+        ];
+        
+        await editWithImage(ctx, text, buttons);
     });
 
     // ========== ADMIN: PRIVATE MODE ==========
@@ -6036,6 +6920,99 @@ ${createLoadingBar(100, '🟩')}
                             await ctx.reply(`ℹ️ User ${input} is already in blocked list.`);
                         }
                         break;
+
+
+                    // ========== BAN FLOW ==========
+                    case 'ban_user_step1': {
+                        const targetUid = input.trim();
+                        if (!/^\d+$/.test(targetUid)) {
+                            await ctx.replyWithHTML(`<b>❌ වැරදි ID එකක්</b>\n\n<i>කරුණාකර අංක පමණක් ඇතුළත් කරන්න.</i>`);
+                            return;
+                        }
+                        if (targetUid === OWNER_ID) {
+                            await ctx.replyWithHTML(`<b>❌ Owner ට ban කරන්න බැහැ!</b>`);
+                            return;
+                        }
+                        ownerPendingAction = `ban_user_step2_${targetUid}`;
+                        await ctx.replyWithHTML(`
+<b>➕ නව Ban එකක් - පියවර 2/3</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>👤 Target User:</b> <code>${escapeHtml(targetUid)}</code>
+
+<b>📝 පියවර 2:</b> Ban කාලය එවන්න.
+
+<b>✅ භාවිතා කළ හැකි formats:</b>
+• <code>30s</code> - තත්පර 30
+• <code>5m</code> - මිනිත්තු 5
+• <code>1h</code> - පැය 1
+• <code>24h</code> - පැය 24
+• <code>1d</code> - දවස් 1
+• <code>7d</code> - දවස් 7
+• <code>1w</code> - සති 1
+• <code>1mo</code> - මාස 1
+• <code>1y</code> - අවුරුද්ද 1
+• <code>permanent</code> - ස්ථිර</blockquote>
+                        `);
+                        return;
+                    }
+                    
+                    // ========== LIMIT SETTINGS ==========
+                    case 'set_daily_limit': {
+                        const val = parseInt(input);
+                        if (isNaN(val) || val < 1 || val > 100) {
+                            await ctx.replyWithHTML(`<b>❌ 1 ත් 100 ත් අතර අංකයක් ඇතුළත් කරන්න.</b>`);
+                            return;
+                        }
+                        if (!CONFIG.user_limits) CONFIG.user_limits = {};
+                        CONFIG.user_limits.daily_create_limit = val;
+                        await updateDbConfig();
+                        await ctx.replyWithHTML(`<b>✅ දෛනික Limit එක <code>${val}</code> ලෙස වෙනස් කර ඇත.</b>`);
+                        ownerPendingAction = null;
+                        return;
+                    }
+                    
+                    case 'set_reset_hours': {
+                        const val = parseInt(input);
+                        if (isNaN(val) || val < 1 || val > 720) {
+                            await ctx.replyWithHTML(`<b>❌ 1 ත් 720 ත් අතර අංකයක් ඇතුළත් කරන්න.</b>`);
+                            return;
+                        }
+                        if (!CONFIG.user_limits) CONFIG.user_limits = {};
+                        CONFIG.user_limits.daily_reset_hours = val;
+                        await updateDbConfig();
+                        await ctx.replyWithHTML(`<b>✅ Reset කාලය <code>${val}h</code> ලෙස වෙනස් කර ඇත.</b>`);
+                        ownerPendingAction = null;
+                        return;
+                    }
+                    
+                    case 'set_max_configs': {
+                        const val = parseInt(input);
+                        if (isNaN(val) || val < 1 || val > 50) {
+                            await ctx.replyWithHTML(`<b>❌ 1 ත් 50 ත් අතර අංකයක් ඇතුළත් කරන්න.</b>`);
+                            return;
+                        }
+                        if (!CONFIG.user_limits) CONFIG.user_limits = {};
+                        CONFIG.user_limits.max_configs_per_user = val;
+                        await updateDbConfig();
+                        await ctx.replyWithHTML(`<b>✅ උපරිම Configs <code>${val}</code> ලෙස වෙනස් කර ඇත.</b>`);
+                        ownerPendingAction = null;
+                        return;
+                    }
+                    
+                    case 'set_max_duration': {
+                        const val = parseInt(input);
+                        if (isNaN(val) || val < 1 || val > 8760) {
+                            await ctx.replyWithHTML(`<b>❌ 1 ත් 8760 ත් අතර අංකයක් ඇතුළත් කරන්න.</b>`);
+                            return;
+                        }
+                        if (!CONFIG.user_limits) CONFIG.user_limits = {};
+                        CONFIG.user_limits.max_duration_hours = val;
+                        await updateDbConfig();
+                        await ctx.replyWithHTML(`<b>✅ උපරිම Duration <code>${val}h</code> ලෙස වෙනස් කර ඇත.</b>`);
+                        ownerPendingAction = null;
+                        return;
+                    }
                         
                     case 'add_allowed_group':
                         if (!GROUP_SETTINGS.allowed_groups.includes(input)) {
@@ -6144,6 +7121,86 @@ ${userData.configs ? userData.configs.map(c =>
                             await sendWithImage(ctx, messageData.text, messageData.reply_markup.inline_keyboard);
                         }
                         break;
+                                        
+                    default:
+                        // ===== DYNAMIC BAN FLOW =====
+                        if (ownerPendingAction && ownerPendingAction.startsWith('ban_user_step2_')) {
+                            const targetUid = ownerPendingAction.replace('ban_user_step2_', '');
+                            const parsed = parseBanDuration(input);
+                            if (!parsed) {
+                                await ctx.replyWithHTML(`<b>❌ වැරදි කාල format එකක්</b>\n\n<i>නැවත උත්සාහ කරන්න:</i> <code>30s, 5m, 1h, 1d, 1w, 1mo, 1y, permanent</code>`);
+                                return;
+                            }
+                            ownerPendingAction = `ban_user_step3_${targetUid}_${input}`;
+                            await ctx.replyWithHTML(`
+<b>➕ නව Ban එකක් - පියවර 3/3</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>👤 Target User:</b> <code>${escapeHtml(targetUid)}</code>
+<b>⏱ කාලය:</b> <code>${escapeHtml(input)}</code>
+
+<b>📝 පියවර 3:</b> Ban කිරීමට හේතුව එවන්න.
+
+<code>උදාහරණය: Terms of Service violation</code>
+<code>උදාහරණය: Spamming / Abuse</code></blockquote>
+
+<i>💡 හේතුව User ට පෙන්වනු ලැබේ.</i>
+                            `);
+                            return;
+                        }
+                        
+                        if (ownerPendingAction && ownerPendingAction.startsWith('ban_user_step3_')) {
+                            const rest = ownerPendingAction.replace('ban_user_step3_', '');
+                            // Find first underscore after the user ID
+                            const firstUnderscore = rest.indexOf('_');
+                            const targetUid = rest.substring(0, firstUnderscore);
+                            const durationInput = rest.substring(firstUnderscore + 1);
+                            const reason = input.trim();
+                            
+                            if (reason.length < 3) {
+                                await ctx.replyWithHTML(`<b>❌ හේතුව අඩු වැඩියි</b>\n\n<i>අවම අකුරු 3ක් වත් ඇතුළත් කරන්න.</i>`);
+                                return;
+                            }
+                            
+                            const result = await banUser(targetUid, durationInput, reason, OWNER_ID);
+                            
+                            if (result.success) {
+                                const display = result.permanent ? 'ස්ථිර' : result.display;
+                                await ctx.replyWithHTML(`
+<b>✅ User Ban කර ඇත</b>
+
+<blockquote><b>👤 User ID:</b> <code>${escapeHtml(targetUid)}</code>
+<b>⏱ කාලය:</b> <code>${escapeHtml(display)}</code>
+<b>📝 හේතුව:</b> <i>${escapeHtml(reason)}</i>
+${result.banUntil ? `<b>📅 නිදහස් වන වේලාව:</b> <code>${new Date(result.banUntil).toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>` : ''}</blockquote>
+
+<i>💡 මෙම user ට දැන් VPN Create කළ නොහැක.</i>
+                                `);
+                                
+                                try {
+                                    let banMsg = `<b>🚫 ඔබව Ban කර ඇත</b>\n\n`;
+                                    banMsg += `<blockquote>`;
+                                    if (result.permanent) {
+                                        banMsg += `<b>⏱ කාලය:</b> <code>ස්ථිර</code>\n`;
+                                    } else {
+                                        banMsg += `<b>⏱ කාලය:</b> <code>${escapeHtml(display)}</code>\n`;
+                                        banMsg += `<b>📅 නිදහස් වන වේලාව:</b> <code>${new Date(result.banUntil).toLocaleString('en-US', { timeZone: 'Asia/Colombo' })}</code>\n`;
+                                    }
+                                    banMsg += `<b>📝 හේතුව:</b> <i>${escapeHtml(reason)}</i>`;
+                                    banMsg += `</blockquote>\n\n`;
+                                    banMsg += `<i>💬 වැඩි විස්තර සඳහා Admin සම්බන්ධ කරගන්න.</i>`;
+                                    
+                                    await bot.telegram.sendMessage(targetUid, banMsg, { parse_mode: 'HTML' });
+                                } catch (e) {
+                                    console.log(`Could not notify banned user ${targetUid}:`, e.message);
+                                }
+                            } else {
+                                await ctx.replyWithHTML(`<b>❌ Ban කිරීමේ දෝෂයක්:</b> <code>${escapeHtml(result.error)}</code>`);
+                            }
+                            
+                            ownerPendingAction = null;
+                            return;
+                        }
                 }
                 
                 ownerPendingAction = null;
