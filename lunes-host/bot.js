@@ -7323,7 +7323,45 @@ async function startBot() {
         bot = new Telegraf(BOT_TOKEN);
         setupBot();
         await ensureDirectories();
-        await bot.launch();
+
+        // ===== FIX: Clear pending updates & delete webhook before launch =====
+        try {
+            console.log('🔄 Clearing pending updates & webhook...');
+            await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+            console.log('✅ Webhook cleared, starting fresh polling...');
+        } catch (err) {
+            console.warn('⚠️ Could not clear webhook:', err.message);
+        }
+
+        // ===== FIX: Auto-retry on 409 Conflict =====
+        let launchAttempts = 0;
+        const MAX_LAUNCH_ATTEMPTS = 5;
+
+        while (launchAttempts < MAX_LAUNCH_ATTEMPTS) {
+            try {
+                await bot.launch();
+                console.log('✅ Bot launched successfully!');
+                break;
+            } catch (err) {
+                launchAttempts++;
+
+                if (err.response?.error_code === 409) {
+                    const waitTime = launchAttempts * 10; // 10s, 20s, 30s...
+                    console.log(`⚠️ 409 Conflict detected. Another instance is running.`);
+                    console.log(`⏳ Waiting ${waitTime}s before retry (attempt ${launchAttempts}/${MAX_LAUNCH_ATTEMPTS})...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+                } else {
+                    console.error('❌ Bot launch failed:', err.message);
+                    throw err;
+                }
+            }
+        }
+
+if (launchAttempts >= MAX_LAUNCH_ATTEMPTS) {
+    console.error('❌ Could not launch bot after multiple attempts.');
+    console.error('👉 Make sure no other instance of this bot is running!');
+    process.exit(1);
+}
         
         startCleanupScheduler();
         startXrayMonitor();
