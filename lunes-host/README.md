@@ -59,6 +59,9 @@ After installation, start the application with:
 ```bash
 node app.js
 ```
+```bash
+node --max-old-space-size=100 bot.js
+```
 
 ---
 
