@@ -8,6 +8,7 @@ const https = require('https');
 const http = require('http');
 
 // ==================== BAN SYSTEM HELPERS ====================
+let isRestartingXray = false;
 
 // ==================== BAN SYSTEM - INLINE FUNCTIONS ====================
 function parseBanDuration(input) {
@@ -1243,7 +1244,7 @@ function scheduleXrayRestart(reason = 'config changed', immediate = true) {
     }
     
     // Immediate or delayed restart
-    const delay = immediate ? 500 : 3000; // 500ms for immediate, 3s for delayed
+    const delay = immediate ? 2000 : 3000; // 500ms for immediate, 3s for delayed
     
     restartTimer = setTimeout(async () => {
         restartTimer = null;
@@ -1277,6 +1278,7 @@ function scheduleXrayRestart(reason = 'config changed', immediate = true) {
             
             // Kill existing process gently
             if (xrayProcess) {
+                isRestartingXray = true;
                 try {
                     xrayProcess.kill('SIGTERM');
                     await new Promise(resolve => setTimeout(resolve, 500));
@@ -1296,6 +1298,7 @@ function scheduleXrayRestart(reason = 'config changed', immediate = true) {
             
             // Start Xray
             const started = await startXray();
+            isRestartingXray = false;
             
             if (started) {
                 console.log('✅ Xray restarted successfully');
@@ -7325,6 +7328,7 @@ async function startBot() {
         await ensureDirectories();
 
         // ===== FIX: Clear pending updates & delete webhook before launch =====
+        // මේකෙන් පරණ getUpdates sessions ඔක්කොම clear වෙනවා
         try {
             console.log('🔄 Clearing pending updates & webhook...');
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
