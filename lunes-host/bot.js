@@ -1461,6 +1461,11 @@ async function startXray() {
             console.log(`Xray exited with code: ${code}`);
             isXrayRunning = false;
             
+            if (isRestartingXray) {
+                console.log('⏳ Restart in progress, ignoring exit event');
+                return;
+            }
+            
             if (code !== 0 && code !== null && !intentionalXrayStop) {
                 // Auto-restart on crash with backoff
                 const now = Date.now();
